@@ -1,0 +1,168 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 15, 23, 42;
+  --background-start-rgb: 248, 250, 252;
+  --background-end-rgb: 255, 255, 255;
+}
+
+body {
+  color: #0f172a;
+  background-color: #f8fafc;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Base Card & Element Styling in White & Grey */
+.card {
+  @apply p-6 rounded-xl shadow-sm bg-white border border-slate-200/80 hover:shadow-md transition-all duration-200;
+}
+
+.card-title {
+  @apply text-lg font-semibold text-slate-800 mb-2;
+}
+
+.page-title {
+  @apply text-2xl md:text-3xl font-bold text-slate-900 pb-1;
+}
+
+.btn-primary {
+  @apply px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors duration-200 font-medium text-sm;
+}
+
+.btn-secondary {
+  @apply px-4 py-2 bg-white text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors duration-200 font-medium text-sm;
+}
+
+/* Sidebar Item */
+.sidebar-item {
+  @apply flex items-center gap-3 p-3 rounded-lg transition-all duration-200 text-slate-600;
+}
+
+.sidebar-item:hover {
+  @apply bg-slate-100 text-slate-900;
+}
+
+.sidebar-item.active {
+  @apply bg-slate-100 text-slate-900 font-medium;
+}
+
+/* Switch component styling */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 22px;
+}
+
+.switch input { 
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #cbd5e1;
+  transition: .3s;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .3s;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+input:checked + .slider {
+  background-color: #10b981; /* Green workflow active */
+}
+
+input:focus + .slider {
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
+input:checked + .slider:before {
+  transform: translateX(22px);
+}
+
+.slider.round {
+  border-radius: 22px;
+}
+
+.slider.round:before {
+  border-radius: 50%;
+}
+
+/* Clean Minimal Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Chat Widget Scrollbar */
+.chat-widget-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+
+.chat-widget-scrollbar::-webkit-scrollbar-track {
+  background: #f8fafc;
+}
+
+.chat-widget-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.chat-widget-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Status Badges */
+.badge-workflow-success {
+  @apply bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs px-2.5 py-1 rounded-full font-medium inline-flex items-center gap-1;
+}
+
+.badge-workflow-running {
+  @apply bg-sky-50 text-sky-700 border border-sky-200 text-xs px-2.5 py-1 rounded-full font-medium inline-flex items-center gap-1;
+}
+
+.badge-workflow-error {
+  @apply bg-rose-50 text-rose-700 border border-rose-200 text-xs px-2.5 py-1 rounded-full font-medium inline-flex items-center gap-1;
+}
+
+.badge-workflow-warning {
+  @apply bg-amber-50 text-amber-700 border border-amber-200 text-xs px-2.5 py-1 rounded-full font-medium inline-flex items-center gap-1;
+}
