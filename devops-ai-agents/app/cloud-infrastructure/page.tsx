@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import PageLayout from '@/components/PageLayout';
 import { 
   BsCloud, 
@@ -34,6 +34,8 @@ interface CloudProvider {
   connected: boolean;
   resources?: number;
   regions?: string[];
+  account?: string;
+  details?: string;
 }
 
 interface MCPServerCloudConfig {
@@ -87,28 +89,28 @@ interface Incident {
 }
 
 export default function CloudInfrastructurePage() {
+  const [liveCloudData, setLiveCloudData] = useState<any>(null);
+
   const [cloudProviders, setCloudProviders] = useState<CloudProvider[]>([
+    {
+      id: 'azure',
+      name: 'Microsoft Azure',
+      icon: <FaMicrosoft size={20} />,
+      connected: true,
+      resources: 1,
+      regions: ['AzureCloud']
+    },
     {
       id: 'aws',
       name: 'AWS',
       icon: <FaAws size={20} />,
-      connected: true,
-      resources: 42,
-      regions: ['us-east-1', 'eu-west-1', 'ap-southeast-2']
-    },
-    {
-      id: 'azure',
-      name: 'Azure',
-      icon: <FaMicrosoft size={20} />,
       connected: false
     },
     {
       id: 'gcp',
       name: 'Google Cloud',
       icon: <FaGoogle size={20} />,
-      connected: true,
-      resources: 27,
-      regions: ['us-central1', 'europe-west1']
+      connected: false
     },
     {
       id: 'oracle',
@@ -129,6 +131,44 @@ export default function CloudInfrastructurePage() {
       connected: false
     }
   ]);
+
+  useEffect(() => {
+    fetch('http://localhost:8000/api/cloud/live-status')
+      .then(res => res.json())
+      .then(data => {
+        setLiveCloudData(data);
+        if (data && data.azure) {
+          setCloudProviders(prev => prev.map(p => {
+            if (p.id === 'azure') {
+              return {
+                ...p,
+                connected: data.azure.connected,
+                resources: data.azure.connected ? 1 : 0,
+                regions: data.azure.connected ? ['AzureCloud'] : undefined,
+                account: data.azure.user,
+                details: data.azure.subscription_name
+              };
+            }
+            if (p.id === 'aws') {
+              return {
+                ...p,
+                connected: data.aws?.connected || false,
+                account: data.aws?.arn
+              };
+            }
+            if (p.id === 'gcp') {
+              return {
+                ...p,
+                connected: data.gcp?.connected || false,
+                account: data.gcp?.account
+              };
+            }
+            return p;
+          }));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const [mcpServers, setMcpServers] = useState<MCPServerCloudConfig[]>([
     {
@@ -384,8 +424,8 @@ export default function CloudInfrastructurePage() {
                   <div>
                     <h4 className="font-semibold text-xs text-slate-900">{provider.name}</h4>
                     {provider.connected && (
-                      <span className="text-[11px] text-slate-500">
-                        {provider.resources} resources monitored
+                      <span className="text-[11px] text-emerald-800 font-medium block truncate max-w-[150px]" title={provider.account || provider.details}>
+                        {provider.account || `${provider.resources} resources monitored`}
                       </span>
                     )}
                   </div>

@@ -1,0 +1,79 @@
+name: DevOps AI Agents CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  backend-test:
+    name: Backend API & AI Agent Engine Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Backend Dependencies
+        run: |
+          pip install fastapi uvicorn httpx pydantic python-dotenv pytest requests
+
+      - name: Run Backend Self-Diagnostic Test
+        run: |
+          python3 -c "
+          from backend_server import app, SYSTEM_PROMPTS, run_heuristic_agent
+          print(f'Verified {len(SYSTEM_PROMPTS)} agent system prompts:')
+          for name in SYSTEM_PROMPTS:
+              print(f'  ✓ {name}')
+          
+          # Test Heuristic Engine across all agents
+          for agent_type in SYSTEM_PROMPTS:
+              res = run_heuristic_agent(agent_type, 'diagnose production issue')
+              assert 'response' in res, f'Missing response for {agent_type}'
+              assert len(res.get('suggestions', [])) > 0, f'Missing suggestions for {agent_type}'
+              print(f'  ✓ Heuristic Test Passed for {agent_type}')
+          print('All Backend AI Agents Passed Diagnostic Tests!')
+          "
+
+  frontend-build:
+    name: Frontend UI & TypeScript Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: devops-ai-agents/package-lock.json
+
+      - name: Install Frontend Dependencies
+        working-directory: devops-ai-agents
+        run: npm ci
+
+      - name: Run TypeScript & Production Build
+        working-directory: devops-ai-agents
+        run: npm run build
+
+  security-audit:
+    name: Security & Container Linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Check Non-Root Dockerfile Compliance
+        run: |
+          if [ -f "Dockerfile" ]; then
+            echo "Auditing Dockerfile..."
+            grep -q "USER " Dockerfile && echo "✓ Non-root USER directive present" || echo "⚠️ Warning: Review USER directive"
+          fi

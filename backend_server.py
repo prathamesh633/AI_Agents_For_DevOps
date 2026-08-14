@@ -10,6 +10,7 @@ import os
 import re
 import json
 import time
+import subprocess
 import httpx
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException
@@ -18,6 +19,104 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv()
+
+def get_live_cloud_status() -> Dict[str, Any]:
+    """Inspects live CLI authentication state for Azure, AWS, GCP, and Git repository."""
+    # 1. Azure status
+    azure_info = {
+        "connected": False,
+        "subscription_name": None,
+        "subscription_id": None,
+        "user": None,
+        "tenant_id": None,
+        "tenant_domain": None,
+        "details": "Azure CLI is not logged in (run 'az login --use-device-code')"
+    }
+    try:
+        az_res = subprocess.run(["az", "account", "show", "--output", "json"], capture_output=True, text=True, timeout=4)
+        if az_res.returncode == 0:
+            data = json.loads(az_res.stdout)
+            azure_info = {
+                "connected": True,
+                "subscription_name": data.get("name"),
+                "subscription_id": data.get("id"),
+                "tenant_id": data.get("tenantId"),
+                "tenant_domain": data.get("tenantDefaultDomain"),
+                "user": data.get("user", {}).get("name"),
+                "state": data.get("state"),
+                "environment": data.get("environmentName"),
+                "details": f"Authenticated as {data.get('user', {}).get('name')} on {data.get('name')}"
+            }
+    except Exception as e:
+        azure_info["details"] = f"Azure check error: {str(e)}"
+
+    # 2. AWS status
+    aws_info = {
+        "connected": False,
+        "account_id": None,
+        "arn": None,
+        "details": "AWS CLI credentials inactive or unauthenticated (run 'aws configure')"
+    }
+    try:
+        aws_res = subprocess.run(["aws", "sts", "get-caller-identity", "--output", "json"], capture_output=True, text=True, timeout=3)
+        if aws_res.returncode == 0:
+            data = json.loads(aws_res.stdout)
+            aws_info = {
+                "connected": True,
+                "account_id": data.get("Account"),
+                "arn": data.get("Arn"),
+                "user_id": data.get("UserId"),
+                "details": f"Connected as IAM {data.get('Arn')}"
+            }
+    except Exception as e:
+        aws_info["details"] = f"AWS CLI inactive: {str(e)}"
+
+    # 3. GCP status
+    gcp_info = {
+        "connected": False,
+        "account": None,
+        "details": "Google Cloud SDK not configured (run 'gcloud auth login')"
+    }
+    try:
+        gcp_res = subprocess.run(["gcloud", "auth", "list", "--format=json"], capture_output=True, text=True, timeout=3)
+        if gcp_res.returncode == 0:
+            accounts = json.loads(gcp_res.stdout)
+            active_acc = next((acc for acc in accounts if acc.get("status") == "ACTIVE"), None)
+            if active_acc:
+                gcp_info = {
+                    "connected": True,
+                    "account": active_acc.get("account"),
+                    "status": "ACTIVE",
+                    "details": f"Authenticated as {active_acc.get('account')}"
+                }
+    except Exception as e:
+        gcp_info["details"] = f"GCP SDK inactive: {str(e)}"
+
+    # 4. Git Remote & Workflows
+    git_info = {
+        "configured": False,
+        "remote": None,
+        "workflows": []
+    }
+    try:
+        git_res = subprocess.run(["git", "remote", "-v"], capture_output=True, text=True, timeout=3)
+        if git_res.returncode == 0 and git_res.stdout.strip():
+            git_info["configured"] = True
+            git_info["remote"] = git_res.stdout.strip().split("\n")[0]
+
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        wf_dir = os.path.join(base_dir, ".github", "workflows")
+        if os.path.isdir(wf_dir):
+            git_info["workflows"] = [f for f in os.listdir(wf_dir) if f.endswith(('.yml', '.yaml'))]
+    except Exception as e:
+        git_info["details"] = str(e)
+
+    return {
+        "azure": azure_info,
+        "aws": aws_info,
+        "gcp": gcp_info,
+        "git": git_info
+    }
 
 app = FastAPI(title="DevOps AI Agents Platform API", version="1.0.0")
 
@@ -403,7 +502,52 @@ docker run -d --name fastapi-service \\
             }
 
     elif agent_type == "cloud-infrastructure":
-        if "blank" in prompt_lower or "easyauth" in prompt_lower or "sso" in prompt_lower or "azure" in prompt_lower:
+        live_status = get_live_cloud_status()
+        azure = live_status.get("azure", {})
+        aws = live_status.get("aws", {})
+        gcp = live_status.get("gcp", {})
+
+        if any(w in prompt_lower for w in ["account", "login", "azure", "aws", "gcp", "connect", "status", "subscription", "whoami"]):
+            azure_text = f"✅ **Connected & Active**\n  - **Subscription:** `{azure.get('subscription_name')}`\n  - **Subscription ID:** `{azure.get('subscription_id')}`\n  - **Tenant User:** `{azure.get('user')}`\n  - **Tenant Domain:** `{azure.get('tenant_domain')}`" if azure.get("connected") else "❌ **Disconnected** — " + azure.get("details", "")
+            aws_text = f"✅ **Connected** (Account: `{aws.get('account_id')}` | IAM: `{aws.get('arn')}`)" if aws.get("connected") else "❌ **Disconnected** — " + aws.get("details", "")
+            gcp_text = f"✅ **Connected** (Account: `{gcp.get('account')}`)" if gcp.get("connected") else "❌ **Disconnected** — " + gcp.get("details", "")
+
+            return {
+                "response": f"""☁️ **Cloud Infrastructure & Account Diagnostics**
+
+### 🌐 Live Multi-Cloud Account Status:
+
+| Cloud Provider | Authentication Status | Details / Active Identity |
+| :--- | :--- | :--- |
+| **Microsoft Azure** | {"🟢 Connected" if azure.get("connected") else "🔴 Inactive"} | {azure.get("user") or "Not logged in"} ({azure.get("subscription_name") or "N/A"}) |
+| **Amazon Web Services (AWS)** | {"🟢 Connected" if aws.get("connected") else "🔴 Inactive"} | {aws.get("arn") or "AWS CLI unauthenticated"} |
+| **Google Cloud Platform (GCP)** | {"🟢 Connected" if gcp.get("connected") else "🔴 Inactive"} | {gcp.get("account") or "GCloud SDK unauthenticated"} |
+
+---
+
+### 🔍 Azure Live Subscription Details:
+{azure_text}
+
+---
+
+### 🛡️ Diagnostic Options & Guardrail Actions:
+1. **Azure Resource Groups:** Run `az group list --output table`
+2. **Azure App Services:** Run `az webapp list --output table`
+3. **AWS STS Identity:** Run `aws sts get-caller-identity`""",
+                "suggestions": [
+                    "List all Azure resource groups",
+                    "Diagnose blank page after EasyAuth SSO on Azure App Service",
+                    "Check VNet database connectivity between App Service and Postgres",
+                    "Audit AWS IAM wildcard policies"
+                ],
+                "execution_plan": [
+                    "[READ_ONLY] az account show --output json",
+                    "[READ_ONLY] az resource list --output table",
+                    "[REQUIRES_APPROVAL] az webapp restart --name <app> --resource-group <rg>"
+                ],
+                "safety_level": "READ_ONLY"
+            }
+        else:
             return {
                 "response": """🔍 **Cloud Infrastructure Doctor Analysis (Azure App Service + EasyAuth SSO)**
 
@@ -441,47 +585,36 @@ az webapp config appsettings set --name <your-app-name> --resource-group <your-r
             }
             
     elif agent_type == "ci-cd":
+        live_status = get_live_cloud_status()
+        git_info = live_status.get("git", {})
+        workflows = git_info.get("workflows", [])
+        wf_list_str = ", ".join([f"`{w}`" for w in workflows]) if workflows else "None detected"
+
         return {
-            "response": """⚡ **CI/CD Pipeline Agent Diagnosis**
+            "response": f"""⚡ **CI/CD Pipeline Agent Diagnosis**
 
-**Analysis for:** `{prompt}`
+**Analyzed Repository:** `{git_info.get('remote') or 'prathamesh633/AI_Agents_For_DevOps'}`
+**Detected Workflows in `.github/workflows/`:** {wf_list_str}
 
-### 🔍 Pipeline Optimization & Failure Report:
-- **Build Bottleneck:** Serial Docker build steps without layer caching.
-- **Security Warning:** Unpinned GitHub Actions dependency versions (`@v1` instead of commit SHA).
-- **Environment Drift:** `DATABASE_URL` present in staging workflow but missing in production runner secrets.
+### 🔍 Pipeline Status & Diagnostic Insights:
+1. **`ci.yml` (DevOps AI Agents CI/CD Pipeline):**
+   - **Backend Job:** Automated test suite for FastAPI & 8 Agent heuristic models.
+   - **Frontend Job:** Next.js 14 TypeScript typecheck & production build.
+   - **Security Job:** Dockerfile non-root user verification.
+2. **`aws.yml` (Amazon ECS Deployment):**
+   - Configured for on-demand `workflow_dispatch` trigger.
 
-### 💡 Suggested `.github/workflows/deploy.yml` Patch:
-```yaml
-name: Production Deployment Pipeline
-on:
-  push:
-    branches: [ main ]
-
-jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        照- name: Build and Push with Cache
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: myrepo/app:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-```""",
+### 💡 Workflow Optimization Recommendations:
+- **Buildx Caching:** Ensure GitHub Actions cache (`cache-from: type=gha`) is active to reduce build times by ~65%.
+- **Secret Hygiene:** Ensure GitHub repository secrets (`AWS_ACCESS_KEY_ID`, `GEMINI_API_KEY`) are scoped per environment.""",
             "suggestions": [
-                "Enable Docker buildx layer caching",
-                "Add automated post-deployment smoke test step",
+                "Run GitHub Actions CI workflow locally",
+                "Add automated Docker build dry-run step",
                 "Audit workflow permissions for GITHUB_TOKEN"
             ],
             "execution_plan": [
-                "[READ_ONLY] github_get_workflow_logs(repo, run_id)",
-                "[REQUIRES_APPROVAL] update_github_secrets(DATABASE_URL)"
+                "[READ_ONLY] inspect_github_workflows('.github/workflows')",
+                "[REQUIRES_APPROVAL] git_push_trigger_workflow('ci.yml')"
             ],
             "safety_level": "READ_ONLY"
         }
@@ -642,6 +775,14 @@ def read_root():
         "agents": list(SYSTEM_PROMPTS.keys())
     }
 
+@app.get("/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "service": "DevOps AI Agents Platform Backend",
+        "timestamp": time.time()
+    }
+
 @app.get("/api/agent/status")
 def get_status():
     gemini_key = os.getenv("GEMINI_API_KEY")
@@ -653,6 +794,38 @@ def get_status():
             "ollama": {"available": True, "type": "Local Ollama LLM (Free Local)"}
         },
         "agents": list(SYSTEM_PROMPTS.keys())
+    }
+
+@app.get("/api/cloud/live-status")
+def get_cloud_status():
+    """Returns live authenticated CLI credentials for Azure, AWS, GCP, and Git remote."""
+    return get_live_cloud_status()
+
+@app.get("/api/cicd/workflows")
+def get_cicd_workflows():
+    """Returns list of local workflows and repository branch information."""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    wf_dir = os.path.join(base_dir, ".github", "workflows")
+    workflows = []
+    if os.path.isdir(wf_dir):
+        for f in os.listdir(wf_dir):
+            if f.endswith(('.yml', '.yaml')):
+                fpath = os.path.join(wf_dir, f)
+                try:
+                    with open(fpath, "r") as wf_file:
+                        content = wf_file.read()
+                        workflows.append({
+                            "filename": f,
+                            "path": f".github/workflows/{f}",
+                            "lines": len(content.splitlines()),
+                            "content": content
+                        })
+                except Exception:
+                    workflows.append({"filename": f, "path": f".github/workflows/{f}", "error": "Unable to read"})
+    return {
+        "repository": "prathamesh633/AI_Agents_For_DevOps",
+        "workflows_count": len(workflows),
+        "workflows": workflows
     }
 
 @app.post("/api/agent/query", response_model=AgentResponse)

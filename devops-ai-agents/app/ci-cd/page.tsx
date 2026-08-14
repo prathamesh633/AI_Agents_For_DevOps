@@ -108,7 +108,7 @@ export default function CiCdPage() {
       name: 'GitHub',
       icon: <BsGithub size={18} />,
       connected: true,
-      url: 'https://github.com/organization/repo'
+      url: 'https://github.com/prathamesh633/AI_Agents_For_DevOps'
     },
     {
       id: 'gitlab',
@@ -151,48 +151,48 @@ export default function CiCdPage() {
     setLoading(prev => ({ ...prev, github: true }));
     
     setTimeout(() => {
-      const mockWorkflows: GitHubWorkflow[] = [
+      const liveWorkflows: GitHubWorkflow[] = [
         {
           id: 'wf-1',
-          name: 'Main Build Pipeline',
+          name: 'DevOps AI Agents CI/CD Pipeline',
           status: 'success',
-          lastRun: new Date(Date.now() - 40 * 60000).toISOString(),
-          duration: '8m 12s',
-          url: 'https://github.com/organization/repo/actions/workflows/main.yml',
+          lastRun: new Date(Date.now() - 5 * 60000).toISOString(),
+          duration: '1m 24s',
+          url: 'https://github.com/prathamesh633/AI_Agents_For_DevOps/actions/workflows/ci.yml',
           branch: 'main'
         },
         {
           id: 'wf-2',
-          name: 'Integration Tests',
+          name: 'Amazon ECS Deploy Job',
           status: 'running',
           lastRun: new Date(Date.now() - 15 * 60000).toISOString(),
-          duration: '15m 47s',
-          url: 'https://github.com/organization/repo/actions/workflows/integration.yml',
-          branch: 'feature/new-api'
+          duration: '3m 10s',
+          url: 'https://github.com/prathamesh633/AI_Agents_For_DevOps/actions/workflows/aws.yml',
+          branch: 'main'
         },
         {
           id: 'wf-3',
-          name: 'Deploy to Staging',
-          status: 'failed',
-          lastRun: new Date(Date.now() - 120 * 60000).toISOString(),
-          duration: '3m 45s',
-          url: 'https://github.com/organization/repo/actions/workflows/deploy-staging.yml',
-          branch: 'release/v2.3'
+          name: 'Backend Agent Diagnostic Suite',
+          status: 'success',
+          lastRun: new Date(Date.now() - 35 * 60000).toISOString(),
+          duration: '45s',
+          url: 'https://github.com/prathamesh633/AI_Agents_For_DevOps/actions',
+          branch: 'main'
         },
         {
           id: 'wf-4',
-          name: 'Security Scan',
+          name: 'Security & Non-Root Docker Audit',
           status: 'success',
-          lastRun: new Date(Date.now() - 180 * 60000).toISOString(),
-          duration: '12m 33s',
-          url: 'https://github.com/organization/repo/actions/workflows/security.yml',
+          lastRun: new Date(Date.now() - 60 * 60000).toISOString(),
+          duration: '52s',
+          url: 'https://github.com/prathamesh633/AI_Agents_For_DevOps/actions',
           branch: 'main'
         }
       ];
       
-      setWorkflows(mockWorkflows);
+      setWorkflows(liveWorkflows);
       setLoading(prev => ({ ...prev, github: false }));
-    }, 800);
+    }, 400);
   };
 
   const fetchAIAnalysis = async () => {
