@@ -392,14 +392,14 @@ terraform apply
 - [GCP Pricing Calculator](https://cloud.google.com/products/calculator)
 
 ### Community
-- GitHub Issues: https://github.com/Yash-Kavaiya/Devops-AI-Agents/issues
+- GitHub Issues: https://github.com/prathamesh633/AI_Agents_For_DevOps/issues
 - GCP Support: https://cloud.google.com/support
 - Terraform Community: https://discuss.hashicorp.com/
 
 ### Quick Links
 - [GCP Console](https://console.cloud.google.com)
 - [Terraform Documentation](https://www.terraform.io/docs)
-- [Project Repository](https://github.com/Yash-Kavaiya/Devops-AI-Agents)
+- [Project Repository](https://github.com/prathamesh633/AI_Agents_For_DevOps)
 
 ## ✅ Checklist
 

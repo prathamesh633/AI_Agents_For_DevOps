@@ -32,7 +32,7 @@ mkdir -p /opt/devops-ai-agents
 cd /opt/devops-ai-agents
 
 # Clone the application (replace with your repository)
-# git clone https://github.com/Yash-Kavaiya/Devops-AI-Agents.git .
+# git clone https://github.com/prathamesh633/AI_Agents_For_DevOps.git .
 
 # For now, create a simple health check endpoint
 cat > /opt/devops-ai-agents/server.js << 'EOF'

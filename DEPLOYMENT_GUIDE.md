@@ -54,7 +54,7 @@ Your GCP account needs these roles:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/Yash-Kavaiya/Devops-AI-Agents.git
+git clone https://github.com/prathamesh633/AI_Agents_For_DevOps.git
 cd Devops-AI-Agents/terraform
 
 # 2. Authenticate with GCP
@@ -590,12 +590,12 @@ terraform destroy
 - [Terraform GCP Provider](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
 - [GCP Best Practices](https://cloud.google.com/docs/enterprise/best-practices-for-enterprise-organizations)
 - [GCP Pricing Calculator](https://cloud.google.com/products/calculator)
-- [Project Repository](https://github.com/Yash-Kavaiya/Devops-AI-Agents)
+- [Project Repository](https://github.com/prathamesh633/AI_Agents_For_DevOps)
+- [GCP Architecture Documentation](./terraform/ARCHITECTURE.md)
+- [Terraform Documentation](./terraform/README.md)
 
-## Support
-
-For issues or questions:
-- GitHub Issues: https://github.com/Yash-Kavaiya/Devops-AI-Agents/issues
+### Getting Help
+- GitHub Issues: https://github.com/prathamesh633/AI_Agents_For_DevOps/issues
 - Documentation: See [README.md](README.md)
 - GCP Support: https://cloud.google.com/support
 

@@ -342,7 +342,7 @@ This document describes the architecture of the DevOps AI Agents platform deploy
 ## Support
 
 For architecture questions or improvements:
-- GitHub Issues: https://github.com/Yash-Kavaiya/Devops-AI-Agents/issues
+- GitHub Issues: https://github.com/prathamesh633/AI_Agents_For_DevOps/issues
 - Documentation: See README.md
 - GCP Support: https://cloud.google.com/support
 
