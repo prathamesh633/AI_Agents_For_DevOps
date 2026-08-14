@@ -267,6 +267,23 @@ export default function AgentChat({ agentType }: AgentChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedKey = localStorage.getItem('devops_gemini_api_key');
+      if (savedKey) {
+        setApiKey(savedKey);
+        setProvider('gemini');
+      }
+    }
+  }, []);
+
+  const handleApiKeyChange = (val: string) => {
+    setApiKey(val);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('devops_gemini_api_key', val);
+    }
+  };
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
@@ -405,15 +422,26 @@ export default function AgentChat({ agentType }: AgentChatProps) {
         </div>
 
         {provider === 'gemini' && (
-          <div className="mt-3 text-xs flex items-center gap-2 bg-white p-2 rounded-lg border border-slate-200">
-            <span className="font-semibold text-slate-700">Gemini API Key:</span>
+          <div className="mt-3 text-xs flex flex-col sm:flex-row sm:items-center gap-2 bg-white p-2.5 rounded-lg border border-amber-200 shadow-2xs">
+            <div className="flex items-center gap-1.5 font-semibold text-slate-800 shrink-0">
+              <BsStars className="text-amber-500" size={14} />
+              <span>Gemini API Key:</span>
+            </div>
             <input
               type="password"
-              placeholder="Paste Free Google Gemini API Key"
+              placeholder="Paste Google AI Studio API Key (AIzaSy...)"
               value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              className="bg-slate-50 text-slate-800 placeholder-slate-400 px-2 py-1 rounded flex-1 text-xs border border-slate-200 focus:outline-none focus:border-slate-400"
+              onChange={(e) => handleApiKeyChange(e.target.value)}
+              className="bg-slate-50 text-slate-900 placeholder-slate-400 px-2.5 py-1 rounded flex-1 text-xs border border-slate-300 focus:outline-none focus:border-amber-500 font-mono"
             />
+            <a
+              href="https://aistudio.google.com/app/apikey"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-amber-700 hover:text-amber-800 underline font-medium whitespace-nowrap"
+            >
+              Get Free Key ↗
+            </a>
           </div>
         )}
       </div>

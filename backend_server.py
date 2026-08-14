@@ -45,8 +45,37 @@ def get_live_cloud_status() -> Dict[str, Any]:
                 "user": data.get("user", {}).get("name"),
                 "state": data.get("state"),
                 "environment": data.get("environmentName"),
-                "details": f"Authenticated as {data.get('user', {}).get('name')} on {data.get('name')}"
+                "details": f"Authenticated as {data.get('user', {}).get('name')} on {data.get('name')}",
+                "resources_count": 0,
+                "resources": [],
+                "resource_groups_count": 0,
+                "resource_groups": []
             }
+            # Query live Azure resources
+            try:
+                res_run = subprocess.run(["az", "resource", "list", "--output", "json"], capture_output=True, text=True, timeout=4)
+                if res_run.returncode == 0:
+                    r_list = json.loads(res_run.stdout)
+                    azure_info["resources_count"] = len(r_list)
+                    azure_info["resources"] = [
+                        {"name": r.get("name"), "type": r.get("type"), "location": r.get("location"), "resourceGroup": r.get("resourceGroup")}
+                        for r in r_list[:10]
+                    ]
+            except Exception:
+                pass
+
+            # Query live Azure resource groups
+            try:
+                rg_run = subprocess.run(["az", "group", "list", "--output", "json"], capture_output=True, text=True, timeout=4)
+                if rg_run.returncode == 0:
+                    g_list = json.loads(rg_run.stdout)
+                    azure_info["resource_groups_count"] = len(g_list)
+                    azure_info["resource_groups"] = [
+                        {"name": g.get("name"), "location": g.get("location")}
+                        for g in g_list[:10]
+                    ]
+            except Exception:
+                pass
     except Exception as e:
         azure_info["details"] = f"Azure check error: {str(e)}"
 
@@ -507,7 +536,66 @@ docker run -d --name fastapi-service \\
         aws = live_status.get("aws", {})
         gcp = live_status.get("gcp", {})
 
-        if any(w in prompt_lower for w in ["account", "login", "azure", "aws", "gcp", "connect", "status", "subscription", "whoami"]):
+        if any(w in prompt_lower for w in ["service", "running", "resource", "vm", "webapp", "group", "rg", "list", "show", "what is", "deployed"]):
+            res_count = azure.get("resources_count", 0)
+            rg_count = azure.get("resource_groups_count", 0)
+            resources_list = azure.get("resources", [])
+            rg_list = azure.get("resource_groups", [])
+
+            if azure.get("connected"):
+                if res_count == 0 and rg_count == 0:
+                    status_body = f"""### 🔍 Live Azure Resource Inspection:
+- **Active Subscription:** `{azure.get('subscription_name')}` (`{azure.get('subscription_id')}`)
+- **Logged-in User:** `{azure.get('user')}`
+- **Active Resource Groups:** `0 groups deployed`
+- **Active App Services / VMs / Databases:** `0 services running`
+
+> ℹ️ **Status:** Your Azure account is successfully connected and authenticated, but there are currently **0 active services or resource groups** running in this subscription."""
+                else:
+                    rg_str = "\n".join([f"  - **RG:** `{g.get('name')}` ({g.get('location')})" for g in rg_list]) if rg_list else "  - None"
+                    res_str = "\n".join([f"  - `{r.get('name')}` | Type: `{r.get('type')}` | RG: `{r.get('resourceGroup')}`" for r in resources_list]) if resources_list else "  - None"
+                    status_body = f"""### 🔍 Live Azure Resource Discovery:
+- **Active Subscription:** `{azure.get('subscription_name')}` (`{azure.get('subscription_id')}`)
+- **Active Resource Groups ({rg_count}):**\n{rg_str}
+- **Discovered Resources ({res_count}):**\n{res_str}"""
+            else:
+                status_body = "❌ **Azure CLI Disconnected:** Run `az login --use-device-code` to authenticate your Azure subscription."
+
+            return {
+                "response": f"""☁️ **Cloud Infrastructure & Service Discovery**
+
+{status_body}
+
+---
+
+### 🛠️ Diagnostic & Provisioning Commands:
+```bash
+# 1. List all available Azure locations/regions
+az account list-locations --output table
+
+# 2. Check current resource group inventory
+az group list --output table
+
+# 3. Create a resource group and deploy an App Service
+az group create --name my-devops-rg --location eastus
+az appservice plan create --name my-app-plan --resource-group my-devops-rg --sku B1 --is-linux
+az webapp create --resource-group my-devops-rg --plan my-app-plan --name my-devops-app --deployment-container-image-name mcr.microsoft.com/dotnet/samples:aspnetapp
+```""",
+                "suggestions": [
+                    "Check Azure account and subscription details",
+                    "List all Azure resource groups",
+                    "Diagnose blank page after EasyAuth SSO on Azure App Service",
+                    "Audit AWS IAM wildcard policies"
+                ],
+                "execution_plan": [
+                    "[READ_ONLY] az resource list --output json",
+                    "[READ_ONLY] az group list --output json",
+                    "[REQUIRES_APPROVAL] az group create --name <rg-name> --location <region>"
+                ],
+                "safety_level": "READ_ONLY"
+            }
+
+        elif any(w in prompt_lower for w in ["account", "login", "azure", "aws", "gcp", "connect", "status", "subscription", "whoami"]):
             azure_text = f"✅ **Connected & Active**\n  - **Subscription:** `{azure.get('subscription_name')}`\n  - **Subscription ID:** `{azure.get('subscription_id')}`\n  - **Tenant User:** `{azure.get('user')}`\n  - **Tenant Domain:** `{azure.get('tenant_domain')}`" if azure.get("connected") else "❌ **Disconnected** — " + azure.get("details", "")
             aws_text = f"✅ **Connected** (Account: `{aws.get('account_id')}` | IAM: `{aws.get('arn')}`)" if aws.get("connected") else "❌ **Disconnected** — " + aws.get("details", "")
             gcp_text = f"✅ **Connected** (Account: `{gcp.get('account')}`)" if gcp.get("connected") else "❌ **Disconnected** — " + gcp.get("details", "")
@@ -535,9 +623,9 @@ docker run -d --name fastapi-service \\
 2. **Azure App Services:** Run `az webapp list --output table`
 3. **AWS STS Identity:** Run `aws sts get-caller-identity`""",
                 "suggestions": [
+                    "Are any Azure services or VMs running?",
                     "List all Azure resource groups",
                     "Diagnose blank page after EasyAuth SSO on Azure App Service",
-                    "Check VNet database connectivity between App Service and Postgres",
                     "Audit AWS IAM wildcard policies"
                 ],
                 "execution_plan": [
@@ -572,6 +660,7 @@ az webapp config appsettings set --name <your-app-name> --resource-group <your-r
   --settings WEBSITE_AUTH_DEFAULT_PROVIDER=AzureActiveDirectory
 ```""",
                 "suggestions": [
+                    "Are any Azure services or VMs running?",
                     "Run VNet connectivity check between App Service and Postgres DB",
                     "Verify Azure Front Door SSL termination rule",
                     "Check Application Insights live metrics stream"
@@ -729,26 +818,31 @@ CMD ["python", "app.py"]
     }
 
 async def call_gemini_api(prompt: str, system_instruction: str, api_key: str) -> str:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-    payload = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {"text": f"System Instruction: {system_instruction}\n\nUser Request: {prompt}"}
+    models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    last_err = None
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for model in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            payload = {
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"text": f"System Instruction: {system_instruction}\n\nUser Request: {prompt}"}
+                        ]
+                    }
                 ]
             }
-        ]
-    }
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        res = await client.post(url, json=payload)
-        if res.status_code != 200:
-            raise Exception(f"Gemini API Error ({res.status_code}): {res.text}")
-        data = res.json()
-        try:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception:
-            return str(data)
+            try:
+                res = await client.post(url, json=payload)
+                if res.status_code == 200:
+                    data = res.json()
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                else:
+                    last_err = f"{model} Error ({res.status_code}): {res.text}"
+            except Exception as e:
+                last_err = str(e)
+    raise Exception(last_err or "Gemini API request failed")
 
 async def call_ollama_api(prompt: str, system_instruction: str) -> str:
     url = "http://localhost:11434/v1/chat/completions"
