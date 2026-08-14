@@ -90,17 +90,17 @@ export default function Home() {
   ];
 
   const containerVariants = {
-    hidden: { opacity: 0 },
+    hidden: { opacity: 1 },
     visible: { 
       opacity: 1,
       transition: { 
-        staggerChildren: 0.05
+        staggerChildren: 0.02
       }
     }
   };
 
   const itemVariants = {
-    hidden: { y: 15, opacity: 0 },
+    hidden: { y: 0, opacity: 1 },
     visible: { y: 0, opacity: 1 }
   };
 

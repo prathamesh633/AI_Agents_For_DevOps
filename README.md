@@ -1,7 +1,7 @@
 # 🤖 Autonomous DevOps AI Agents Platform 🚀
 
 <div align="center">
-  <img src="Images/home.png" alt="DevOps AI Agents Platform Banner" width="800px" />
+  <img src="Images/home.png" alt="DevOps AI Agents Platform Banner" width="100%" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.12);" />
 </div>
 
 <div align="center">
@@ -39,13 +39,12 @@
 
 ## 📋 Table of Contents
 
+- [⚡ Quick Start (Single Command)](#-quick-start-single-command)
 - [✨ Core Capabilities](#-core-capabilities)
 - [🤖 Specialized DevOps Agents](#-specialized-devops-agents)
+- [📸 Screenshots & Visual Walkthrough](#-screenshots--visual-walkthrough)
 - [🛠️ Technology Stack](#️-technology-stack)
-- [🚀 Quick Start (Single Command)](#-quick-start-single-command)
-- [🏗️ System Architecture](#️-system-architecture)
 - [🧠 AI Engine & Safety Guardrails](#-ai-engine--safety-guardrails)
-- [📸 Screenshots & Walkthrough](#-screenshots--walkthrough)
 - [🤝 Contributing](#-contributing)
 - [📄 License](#-license)
 - [📞 Author & Support](#-author--support)
@@ -107,6 +106,80 @@ npm run dev
 | 📊 **Performance Monitoring** | `/performance-monitoring` | Real-time APM telemetry, p99 latency percentile histograms, and anomaly detection. |
 | ⚡ **Load Testing & FinOps** | `/load-testing` | Generates k6 and Locust load-testing scenarios with concurrency benchmarking and cost projections. |
 | 🚨 **Incident Response** | `/incident-response` | Live War Room with automated 5-Why Root Cause Analysis (RCA) and deterministic remediation runbooks. |
+
+---
+
+## 📸 Screenshots & Visual Walkthrough
+
+### 🏠 1. Main Dashboard & Agent Matrix
+*Central DevOps Command Center with real-time health metrics and one-click access to all 8 specialized agents.*
+<p align="center">
+  <img src="Images/home.png" alt="DevOps AI Agents Main Dashboard" width="95%" />
+</p>
+
+---
+
+### 🐳 2. Container Creation Studio
+*Generates hardened, CIS-benchmark compliant, multi-stage Dockerfiles with non-root user enforcement and docker-compose configurations.*
+<p align="center">
+  <img src="Images/Container.png" alt="Container Creation Studio" width="95%" />
+</p>
+
+---
+
+### 🔄 3. CI/CD Pipeline Management & Healing
+*Intelligent pipeline diagnostics, buildx layer caching, and automatic workflow error resolution.*
+<p align="center">
+  <img src="Images/ci.png" alt="CI/CD Pipeline Agent" width="95%" />
+</p>
+
+---
+
+### ☁️ 4. Cloud Infrastructure & FinOps Optimization
+*Multi-cloud telemetry, Azure EasyAuth diagnostics, AWS IAM audits, and resource cost reduction insights.*
+<p align="center">
+  <img src="Images/infra.png" alt="Cloud Infrastructure Studio" width="95%" />
+</p>
+
+---
+
+### 🔒 5. Security & Compliance Scanning
+*Automated vulnerability scanning, SAST/SCA policy checks, and secret leak prevention.*
+<p align="center">
+  <img src="Images/security.png" alt="Security Scanning Studio" width="95%" />
+</p>
+
+---
+
+### 🧪 6. Code Analysis & Quality Audit
+*Detects memory leaks, async deadlocks, unindexed DB queries, and cyclomatic complexity hotspots.*
+<p align="center">
+  <img src="Images/code_analysis.png" alt="Code Analysis Studio" width="95%" />
+</p>
+
+---
+
+### 📊 7. Real-Time Performance Monitoring
+*APM telemetry dashboard displaying p99 latency percentiles, worker CPU spikes, and memory throughput.*
+<p align="center">
+  <img src="Images/performance.png" alt="Performance Monitoring Studio" width="95%" />
+</p>
+
+---
+
+### ⚡ 8. Load Testing & Concurrency Benchmarking
+*Simulates high-traffic scenarios using k6 and Locust scripts with auto-scaling stress tests.*
+<p align="center">
+  <img src="Images/loadtest.png" alt="Load Testing Studio" width="95%" />
+</p>
+
+---
+
+### 🚨 9. Incident Response War Room
+*Live incident triage featuring automated 5-Why Root Cause Analysis and deterministic runbook execution.*
+<p align="center">
+  <img src="Images/incident.png" alt="Incident Response War Room" width="95%" />
+</p>
 
 ---
 
