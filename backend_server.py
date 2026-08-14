@@ -1,9 +1,7 @@
 """
-DevOps AI Agents Platform - Local Demo Backend Server
-Supports Free Providers:
-1. Gemini 2.0 / 1.5 Flash (Google AI Studio Free Key)
-2. Local Ollama LLM (http://localhost:11434)
-3. Local Heuristic Engine (Offline / Zero Setup Free Fallback)
+FastAPI Backend Server for DevOps AI Agents Platform.
+Provides multi-agent diagnostics, cloud credential discovery (Azure/AWS/GCP/Git),
+and three-tier AI execution (Free Local Intelligent Heuristic, Google Gemini 2.0 Flash, Local Ollama).
 """
 
 import os
@@ -11,17 +9,25 @@ import re
 import json
 import time
 import subprocess
-import httpx
-from typing import Dict, Any, Optional
-from fastapi import FastAPI, HTTPException
+from typing import Optional, Dict, Any, List
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
 
-def get_live_cloud_status() -> Dict[str, Any]:
-    """Inspects live CLI authentication state for Azure, AWS, GCP, and Git repository."""
+_CLOUD_STATUS_CACHE: Dict[str, Any] = {}
+_CLOUD_STATUS_TIMESTAMP: float = 0.0
+
+def get_live_cloud_status(force_refresh: bool = False) -> Dict[str, Any]:
+    """Inspects live CLI authentication state for Azure, AWS, GCP, and Git repository with 60s caching."""
+    global _CLOUD_STATUS_CACHE, _CLOUD_STATUS_TIMESTAMP
+    now = time.time()
+    if not force_refresh and _CLOUD_STATUS_CACHE and (now - _CLOUD_STATUS_TIMESTAMP < 60):
+        return _CLOUD_STATUS_CACHE
+
     # 1. Azure status
     azure_info = {
         "connected": False,
@@ -30,7 +36,11 @@ def get_live_cloud_status() -> Dict[str, Any]:
         "user": None,
         "tenant_id": None,
         "tenant_domain": None,
-        "details": "Azure CLI is not logged in (run 'az login --use-device-code')"
+        "details": "Azure CLI is not logged in (run 'az login --use-device-code')",
+        "resources_count": 0,
+        "resources": [],
+        "resource_groups_count": 0,
+        "resource_groups": []
     }
     try:
         az_res = subprocess.run(["az", "account", "show", "--output", "json"], capture_output=True, text=True, timeout=4)
@@ -140,12 +150,15 @@ def get_live_cloud_status() -> Dict[str, Any]:
     except Exception as e:
         git_info["details"] = str(e)
 
-    return {
+    res_dict = {
         "azure": azure_info,
         "aws": aws_info,
         "gcp": gcp_info,
         "git": git_info
     }
+    _CLOUD_STATUS_CACHE = res_dict
+    _CLOUD_STATUS_TIMESTAMP = time.time()
+    return res_dict
 
 app = FastAPI(title="DevOps AI Agents Platform API", version="1.0.0")
 
@@ -160,7 +173,7 @@ app.add_middleware(
 class AgentRequest(BaseModel):
     agent_type: str
     prompt: str
-    provider: Optional[str] = "heuristic" # "heuristic", "gemini", "ollama"
+    provider: Optional[str] = "heuristic"
     api_key: Optional[str] = None
     context: Optional[str] = None
 
@@ -170,7 +183,7 @@ class AgentResponse(BaseModel):
     response: str
     suggestions: list[str]
     execution_plan: Optional[list[str]] = None
-    safety_level: str = "READ_ONLY" # "READ_ONLY", "REQUIRES_APPROVAL", "DESTRUCTIVE"
+    safety_level: str = "READ_ONLY"
     timestamp: float
 
 SYSTEM_PROMPTS = {
@@ -178,8 +191,8 @@ SYSTEM_PROMPTS = {
 Your goal is to optimize workflows, fix build failures, analyze GitHub Actions / GitLab CI / Dockerfiles, and verify deployments.
 Always provide structured diagnostic steps, root causes, and clear fix recommendations.""",
 
-    "cloud-infrastructure": """You are a Cloud Infrastructure & Network Doctor Agent specializing in Azure and AWS.
-Your expertise includes: Azure App Service, EasyAuth/SSO header forwarding (X-MS-CLIENT-PRINCIPAL), VNet integration, private endpoints, AWS IAM, S3 bucket security, and cost optimization.
+    "cloud-infrastructure": """You are a Cloud Infrastructure & Network Doctor Agent specializing in Azure, AWS, and GCP.
+Your expertise includes: Azure App Service, EasyAuth/SSO header forwarding, VNet integration, Private Endpoints, AWS IAM, S3 bucket security, Kubernetes, Terraform, and cost optimization.
 Always highlight safe read-only operations vs state-changing commands requiring approval.""",
 
     "code-analysis": """You are a Code Analysis & Quality Agent.
@@ -207,336 +220,97 @@ Quickly parse crash logs, stack traces, HTTP 500/502/504 errors, generate Root C
 }
 
 def run_heuristic_agent(agent_type: str, prompt: str) -> Dict[str, Any]:
-    prompt_lower = prompt.lower()
+    """
+    Intelligent heuristic reasoning engine that evaluates domain parameters,
+    matches intent keywords, and generates specialized technical plans for any DevOps query.
+    """
+    p = prompt.lower()
+    live_status = get_live_cloud_status()
+    azure = live_status.get("azure", {})
+    aws = live_status.get("aws", {})
+    gcp = live_status.get("gcp", {})
+    git_info = live_status.get("git", {})
     
-    # CONTAINER CREATION & DOCKERFILE GENERATOR AGENT
-    if agent_type in ("container-creation", "container-orchestration"):
-        if "next" in prompt_lower or "react" in prompt_lower or "node" in prompt_lower or "frontend" in prompt_lower:
+    # -------------------------------------------------------------
+    # 1. CLOUD INFRASTRUCTURE AGENT
+    # -------------------------------------------------------------
+    if agent_type == "cloud-infrastructure":
+        if any(w in p for w in ["endpoint", "vnet", "postgres", "private", "network", "subnet", "peering"]):
             return {
-                "response": """🐳 **Container Creation Agent — Next.js 14 Standalone Multi-Stage Dockerfile**
-
-**Detected Stack:** Next.js 14 / TypeScript (Standalone Output Mode)
-**Target Architecture:** Linux amd64/arm64 • Non-root `nextjs` user • Image Size: ~120MB
-
-### 📄 Production-Ready `Dockerfile`:
-```dockerfile
-# -------------------------------------------------------------
-# Stage 1: Base Dependencies
-# -------------------------------------------------------------
-FROM node:20-alpine AS deps
-RUN apk add --no-cache libc6-compat
-WORKDIR /app
-
-# Copy package descriptors for layer caching
-COPY package.json package-lock.json* yarn.lock* pnpm-lock.yaml* ./
-RUN \\
-  if [ -f package-lock.json ]; then npm ci; \\
-  elif [ -f yarn.lock ]; then yarn --frozen-lockfile; \\
-  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm i --frozen-lockfile; \\
-  else npm install; \\
-  fi
-
-# -------------------------------------------------------------
-# Stage 2: Source Builder
-# -------------------------------------------------------------
-FROM node:20-alpine AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-
-# Set production env and build standalone bundle
-ENV NEXT_TELEMETRY_DISABLED=1
-ENV NODE_ENV=production
-RUN npm run build
-
-# -------------------------------------------------------------
-# Stage 3: Minimal Production Runner (Distroless-style)
-# -------------------------------------------------------------
-FROM node:20-alpine AS runner
-WORKDIR /app
-
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
-
-# Security: Create non-root system user
-RUN addgroup --system --gid 1001 nodejs && \\
-    adduser --system --uid 1001 nextjs
-
-# Copy only standalone output & static assets
-COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-USER nextjs
-
-EXPOSE 3000
-
-# Health Check Directive
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \\
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1
-
-CMD ["node", "server.js"]
-```
-
-### 📋 Accompanying `.dockerignore`:
-```dockerignore
-node_modules
-.next
-.git
-.gitignore
-*.md
-.env*.local
-.vscode
-Dockerfile*
-docker-compose*
-```""",
+                "response": (
+                    "☁️ **Azure Private Endpoint & VNet Architecture Configuration**\n\n"
+                    "**Target:** Secure connectivity between Azure App Service & Azure Database for PostgreSQL (Flexible Server).\n\n"
+                    "### 🏗️ Network Topology Architecture:\n"
+                    "1. **Virtual Network (VNet):** `10.0.0.0/16` with two dedicated subnets:\n"
+                    "   - `AppServiceSubnet`: `10.0.1.0/24` (delegated to `Microsoft.Web/serverFarms`)\n"
+                    "   - `PrivateEndpointSubnet`: `10.0.2.0/24` (private link endpoints)\n"
+                    "2. **Private DNS Zone:** `privatelink.postgres.database.azure.com` linked to the VNet.\n\n"
+                    "### 🛠️ Deployment CLI Commands:\n"
+                    "```bash\n"
+                    "# 1. Create Resource Group & VNet\n"
+                    "az group create --name rg-network-secure --location eastus\n"
+                    "az network vnet create --name vnet-main --resource-group rg-network-secure \\\n"
+                    "  --address-prefixes 10.0.0.0/16 --subnet-name AppServiceSubnet --subnet-prefixes 10.0.1.0/24\n\n"
+                    "# 2. Add Private Subnet & delegate App Service Subnet\n"
+                    "az network vnet subnet create --vnet-name vnet-main --name PrivateEndpointSubnet \\\n"
+                    "  --resource-group rg-network-secure --address-prefixes 10.0.2.0/24\n"
+                    "az network vnet subnet update --vnet-name vnet-main --name AppServiceSubnet \\\n"
+                    "  --resource-group rg-network-secure --delegations Microsoft.Web/serverFarms\n\n"
+                    "# 3. Integrate App Service with VNet\n"
+                    "az webapp vnet-integration add --name my-app-service --resource-group rg-network-secure \\\n"
+                    "  --vnet vnet-main --subnet AppServiceSubnet\n\n"
+                    "# 4. Disable Public Network Access on Postgres Flexible Server\n"
+                    "az postgres flexible-server update --name pg-server-secure --resource-group rg-network-secure \\\n"
+                    "  --public-network-access Disabled\n"
+                    "```"
+                ),
                 "suggestions": [
-                    "Generate docker-compose.yml with reverse proxy",
-                    "Add multi-arch build command (amd64/arm64)",
-                    "Audit Dockerfile security with Trivy/Hadolint"
+                    "Verify Private DNS resolution from App Service console",
+                    "Audit Network Security Group (NSG) inbound rules",
+                    "Check EasyAuth SSO header passthrough"
                 ],
                 "execution_plan": [
-                    "[READ_ONLY] fs_detect_project_framework() -> Next.js 14",
-                    "[READ_ONLY] dockerfile_lint_security_audit() -> PASSED (Non-root, Multi-stage)",
-                    "[REQUIRES_APPROVAL] fs_write_file(path='./Dockerfile')",
-                    "[REQUIRES_APPROVAL] fs_write_file(path='./.dockerignore')"
-                ],
-                "safety_level": "REQUIRES_APPROVAL"
-            }
-            
-        elif "compose" in prompt_lower or "postgres" in prompt_lower or "redis" in prompt_lower or "stack" in prompt_lower:
-            return {
-                "response": """🐳 **Container Creation Agent — Full-Stack Production `docker-compose.yml`**
-
-**Stack Scope:** FastAPI Backend + Next.js Frontend + PostgreSQL Database + Redis Cache
-
-### 📄 Production `docker-compose.yml`:
-```yaml
-version: '3.8'
-
-services:
-  # -----------------------------------------------------------
-  # PostgreSQL Database Service
-  # -----------------------------------------------------------
-  postgres:
-    image: postgres:16-alpine
-    container_name: devops_postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-app_db}
-      POSTGRES_USER: ${POSTGRES_USER:-app_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_dev_password}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app_user} -d ${POSTGRES_DB:-app_db}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # -----------------------------------------------------------
-  # Redis Cache / Message Broker
-  # -----------------------------------------------------------
-  redis:
-    image: redis:7-alpine
-    container_name: devops_redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-
-  # -----------------------------------------------------------
-  # FastAPI Backend API Service
-  # -----------------------------------------------------------
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: devops_backend
-    restart: unless-stopped
-    environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-app_user}:${POSTGRES_PASSWORD:-secure_dev_password}@postgres:5432/${POSTGRES_DB:-app_db}
-      - REDIS_URL=redis://redis:6379/0
-      - ENVIRONMENT=production
-    ports:
-      - "8000:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-
-  # -----------------------------------------------------------
-  # Next.js Frontend Dashboard Service
-  # -----------------------------------------------------------
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: devops_frontend
-    restart: unless-stopped
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
-    ports:
-      - "3000:3000"
-    depends_on:
-      - backend
-
-volumes:
-  postgres_data:
-  redis_data:
-
-networks:
-  default:
-    name: devops_agent_network
-```""",
-                "suggestions": [
-                    "Generate .env.example with secure default variables",
-                    "Add Nginx reverse proxy service with SSL termination",
-                    "Create database initialization SQL script"
-                ],
-                "execution_plan": [
-                    "[READ_ONLY] validate_compose_schema(version='3.8')",
-                    "[REQUIRES_APPROVAL] fs_write_file(path='./docker-compose.yml')",
-                    "[REQUIRES_APPROVAL] docker_compose_up_test(detach=True)"
+                    "[READ_ONLY] az network vnet list --resource-group rg-network-secure --output table",
+                    "[REQUIRES_APPROVAL] az webapp vnet-integration add --name <app> --subnet <subnet>",
+                    "[REQUIRES_APPROVAL] az postgres flexible-server update --public-network-access Disabled"
                 ],
                 "safety_level": "REQUIRES_APPROVAL"
             }
 
-        else:
-            # Default / Python FastAPI / General Container Creation
+        elif any(w in p for w in ["cost", "finops", "billing", "budget", "optimize", "savings", "reserved"]):
             return {
-                "response": """🐳 **Container Creation Agent — Hardened Multi-Stage Python/FastAPI Dockerfile**
-
-**Detected Stack:** Python 3.11 / FastAPI / Uvicorn
-**Security Standard:** CIS Benchmark • Non-root `appuser` • Slim Debian Base • Layer Caching
-
-### 📄 Hardened `Dockerfile`:
-```dockerfile
-# -------------------------------------------------------------
-# Stage 1: Build Dependencies & Wheels
-# -------------------------------------------------------------
-FROM python:3.11-slim AS builder
-
-WORKDIR /build
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \\
-    build-essential \\
-    curl \\
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements and compile wheels
-COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
-
-# -------------------------------------------------------------
-# Stage 2: Lean Production Runtime
-# -------------------------------------------------------------
-FROM python:3.11-slim AS runtime
-
-# Set environment variables for performance & safety
-ENV PYTHONDONTWRITEBYTECODE=1 \\
-    PYTHONUNBUFFERED=1 \\
-    PYTHONFAULTHANDLER=1 \\
-    PATH="/home/appuser/.local/bin:$PATH"
-
-# Security: Create non-root dedicated application user
-RUN groupadd -g 10001 appgroup && \\
-    useradd -u 10001 -g appgroup -s /bin/bash -m appuser
-
-WORKDIR /app
-
-# Copy compiled Python packages from builder stage
-COPY --from=builder --chown=appuser:appgroup /root/.local /home/appuser/.local
-
-# Copy application source code with correct ownership
-COPY --chown=appuser:appgroup . /app
-
-# Switch to non-root user
-USER appuser
-
-# Expose FastAPI application port
-EXPOSE 8000
-
-# Health check directive
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \\
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
-
-# Production server execution
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--proxy-headers"]
-```
-
-### 📋 Accompanying `.dockerignore`:
-```dockerignore
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
-.venv/
-.git
-.gitignore
-.env
-.pytest_cache/
-.coverage
-htmlcov/
-Dockerfile*
-docker-compose*
-*.md
-```
-
-### 🚀 Build & Run Commands:
-```bash
-# 1. Build optimized image
-docker build -t my-fastapi-app:latest .
-
-# 2. Run container with memory limit and read-only safety
-docker run -d --name fastapi-service \\
-  -p 8000:8000 \\
-  --memory="512m" \\
-  --cpus="1.0" \\
-  my-fastapi-app:latest
-```""",
+                "response": (
+                    "💰 **Cloud Cost Optimization & FinOps Audit Strategy**\n\n"
+                    "**Focus:** Eliminating cloud waste and right-sizing underutilized compute/storage resources.\n\n"
+                    "### 📊 Key Cloud Waste Identifiers:\n"
+                    "1. **Unattached Disks & IPs:** Orphaned Azure Managed Disks and AWS unattached Elastic IPs.\n"
+                    "2. **Idle Non-Production Compute:** Development VMs and App Services running 24/7 on weekends.\n"
+                    "3. **Overprovisioned Database Tiers:** Premium SSDs provisioned where standard GPv2 suffices.\n"
+                    "4. **Log Retention Oversights:** Azure Log Analytics / AWS CloudWatch storing unindexed logs for > 90 days.\n\n"
+                    "### 🛠️ Optimization Action Plan:\n"
+                    "```bash\n"
+                    "# 1. Find all unattached Azure managed disks\n"
+                    "az disk list --query \"[?managedBy==null].{Name:name, ResourceGroup:resourceGroup, SizeGB:diskSizeGb}\" --output table\n\n"
+                    "# 2. Find public IPs not bound to any NIC\n"
+                    "az network public-ip list --query \"[?ipConfiguration==null].{Name:name, IP:ipAddress}\" --output table\n\n"
+                    "# 3. Scale down non-production App Service Plan outside business hours\n"
+                    "az appservice plan update --name dev-plan --resource-group dev-rg --sku B1\n"
+                    "```"
+                ),
                 "suggestions": [
-                    "Create Next.js 14 standalone Dockerfile",
-                    "Generate docker-compose.yml for FastAPI + PostgreSQL",
-                    "Generate Streamlit frontend Dockerfile (Port 8501)",
-                    "Audit Dockerfile for CIS security compliance"
+                    "Configure auto-shutdown schedules on test VMs",
+                    "Purchase 1-year Reserved Instances for stable workloads (up to 42% savings)",
+                    "Set up monthly Azure Budget alert at 80% threshold"
                 ],
                 "execution_plan": [
-                    "[READ_ONLY] fs_scan_project_dependencies(requirements.txt)",
-                    "[READ_ONLY] dockerfile_lint_best_practices(HADOLINT)",
-                    "[REQUIRES_APPROVAL] fs_write_file(path='./Dockerfile', content=...)",
-                    "[REQUIRES_APPROVAL] fs_write_file(path='./.dockerignore', content=...)"
+                    "[READ_ONLY] az disk list --query '[?managedBy==null]' --output json",
+                    "[READ_ONLY] az network public-ip list --query '[?ipConfiguration==null]' --output json",
+                    "[REQUIRES_APPROVAL] az disk delete --name <disk-name> --resource-group <rg>"
                 ],
-                "safety_level": "REQUIRES_APPROVAL"
+                "safety_level": "READ_ONLY"
             }
 
-    elif agent_type == "cloud-infrastructure":
-        live_status = get_live_cloud_status()
-        azure = live_status.get("azure", {})
-        aws = live_status.get("aws", {})
-        gcp = live_status.get("gcp", {})
-
-        if any(w in prompt_lower for w in ["service", "running", "resource", "vm", "webapp", "group", "rg", "list", "show", "what is", "deployed"]):
+        elif any(w in p for w in ["service", "running", "resource", "vm", "webapp", "group", "rg", "deployed", "active"]):
             res_count = azure.get("resources_count", 0)
             rg_count = azure.get("resource_groups_count", 0)
             resources_list = azure.get("resources", [])
@@ -544,47 +318,47 @@ docker run -d --name fastapi-service \\
 
             if azure.get("connected"):
                 if res_count == 0 and rg_count == 0:
-                    status_body = f"""### 🔍 Live Azure Resource Inspection:
-- **Active Subscription:** `{azure.get('subscription_name')}` (`{azure.get('subscription_id')}`)
-- **Logged-in User:** `{azure.get('user')}`
-- **Active Resource Groups:** `0 groups deployed`
-- **Active App Services / VMs / Databases:** `0 services running`
-
-> ℹ️ **Status:** Your Azure account is successfully connected and authenticated, but there are currently **0 active services or resource groups** running in this subscription."""
+                    status_body = (
+                        "### 🔍 Live Azure Resource Inspection:\n"
+                        f"- **Active Subscription:** `{azure.get('subscription_name')}` (`{azure.get('subscription_id')}`)\n"
+                        f"- **Logged-in User:** `{azure.get('user')}`\n"
+                        "- **Active Resource Groups:** `0 groups deployed`\n"
+                        "- **Active App Services / VMs / Databases:** `0 services running`\n\n"
+                        f"> ℹ️ **Status:** Your Azure account is successfully connected and authenticated, but there are currently **0 active services or resource groups** running in this subscription."
+                    )
                 else:
                     rg_str = "\n".join([f"  - **RG:** `{g.get('name')}` ({g.get('location')})" for g in rg_list]) if rg_list else "  - None"
                     res_str = "\n".join([f"  - `{r.get('name')}` | Type: `{r.get('type')}` | RG: `{r.get('resourceGroup')}`" for r in resources_list]) if resources_list else "  - None"
-                    status_body = f"""### 🔍 Live Azure Resource Discovery:
-- **Active Subscription:** `{azure.get('subscription_name')}` (`{azure.get('subscription_id')}`)
-- **Active Resource Groups ({rg_count}):**\n{rg_str}
-- **Discovered Resources ({res_count}):**\n{res_str}"""
+                    status_body = (
+                        "### 🔍 Live Azure Resource Discovery:\n"
+                        f"- **Active Subscription:** `{azure.get('subscription_name')}` (`{azure.get('subscription_id')}`)\n"
+                        f"- **Active Resource Groups ({rg_count}):**\n{rg_str}\n"
+                        f"- **Discovered Resources ({res_count}):**\n{res_str}"
+                    )
             else:
                 status_body = "❌ **Azure CLI Disconnected:** Run `az login --use-device-code` to authenticate your Azure subscription."
 
             return {
-                "response": f"""☁️ **Cloud Infrastructure & Service Discovery**
-
-{status_body}
-
----
-
-### 🛠️ Diagnostic & Provisioning Commands:
-```bash
-# 1. List all available Azure locations/regions
-az account list-locations --output table
-
-# 2. Check current resource group inventory
-az group list --output table
-
-# 3. Create a resource group and deploy an App Service
-az group create --name my-devops-rg --location eastus
-az appservice plan create --name my-app-plan --resource-group my-devops-rg --sku B1 --is-linux
-az webapp create --resource-group my-devops-rg --plan my-app-plan --name my-devops-app --deployment-container-image-name mcr.microsoft.com/dotnet/samples:aspnetapp
-```""",
+                "response": (
+                    "☁️ **Cloud Infrastructure & Service Discovery**\n\n"
+                    + status_body
+                    + "\n\n---\n\n"
+                    "### 🛠️ Diagnostic & Provisioning Commands:\n"
+                    "```bash\n"
+                    "# 1. List all available Azure locations/regions\n"
+                    "az account list-locations --output table\n\n"
+                    "# 2. Check current resource group inventory\n"
+                    "az group list --output table\n\n"
+                    "# 3. Create a resource group and deploy an App Service\n"
+                    "az group create --name my-devops-rg --location eastus\n"
+                    "az appservice plan create --name my-app-plan --resource-group my-devops-rg --sku B1 --is-linux\n"
+                    "az webapp create --resource-group my-devops-rg --plan my-app-plan --name my-devops-app --deployment-container-image-name mcr.microsoft.com/dotnet/samples:aspnetapp\n"
+                    "```"
+                ),
                 "suggestions": [
                     "Check Azure account and subscription details",
                     "List all Azure resource groups",
-                    "Diagnose blank page after EasyAuth SSO on Azure App Service",
+                    "Configure private endpoints between App Service and Postgres",
                     "Audit AWS IAM wildcard policies"
                 ],
                 "execution_plan": [
@@ -595,37 +369,33 @@ az webapp create --resource-group my-devops-rg --plan my-app-plan --name my-devo
                 "safety_level": "READ_ONLY"
             }
 
-        elif any(w in prompt_lower for w in ["account", "login", "azure", "aws", "gcp", "connect", "status", "subscription", "whoami"]):
+        elif any(w in p for w in ["account", "login", "azure", "aws", "gcp", "connect", "status", "subscription", "whoami"]):
             azure_text = f"✅ **Connected & Active**\n  - **Subscription:** `{azure.get('subscription_name')}`\n  - **Subscription ID:** `{azure.get('subscription_id')}`\n  - **Tenant User:** `{azure.get('user')}`\n  - **Tenant Domain:** `{azure.get('tenant_domain')}`" if azure.get("connected") else "❌ **Disconnected** — " + azure.get("details", "")
             aws_text = f"✅ **Connected** (Account: `{aws.get('account_id')}` | IAM: `{aws.get('arn')}`)" if aws.get("connected") else "❌ **Disconnected** — " + aws.get("details", "")
             gcp_text = f"✅ **Connected** (Account: `{gcp.get('account')}`)" if gcp.get("connected") else "❌ **Disconnected** — " + gcp.get("details", "")
 
             return {
-                "response": f"""☁️ **Cloud Infrastructure & Account Diagnostics**
-
-### 🌐 Live Multi-Cloud Account Status:
-
-| Cloud Provider | Authentication Status | Details / Active Identity |
-| :--- | :--- | :--- |
-| **Microsoft Azure** | {"🟢 Connected" if azure.get("connected") else "🔴 Inactive"} | {azure.get("user") or "Not logged in"} ({azure.get("subscription_name") or "N/A"}) |
-| **Amazon Web Services (AWS)** | {"🟢 Connected" if aws.get("connected") else "🔴 Inactive"} | {aws.get("arn") or "AWS CLI unauthenticated"} |
-| **Google Cloud Platform (GCP)** | {"🟢 Connected" if gcp.get("connected") else "🔴 Inactive"} | {gcp.get("account") or "GCloud SDK unauthenticated"} |
-
----
-
-### 🔍 Azure Live Subscription Details:
-{azure_text}
-
----
-
-### 🛡️ Diagnostic Options & Guardrail Actions:
-1. **Azure Resource Groups:** Run `az group list --output table`
-2. **Azure App Services:** Run `az webapp list --output table`
-3. **AWS STS Identity:** Run `aws sts get-caller-identity`""",
+                "response": (
+                    "☁️ **Cloud Infrastructure & Account Diagnostics**\n\n"
+                    "### 🌐 Live Multi-Cloud Account Status:\n\n"
+                    "| Cloud Provider | Authentication Status | Details / Active Identity |\n"
+                    "| :--- | :--- | :--- |\n"
+                    f"| **Microsoft Azure** | {'🟢 Connected' if azure.get('connected') else '🔴 Inactive'} | {azure.get('user') or 'Not logged in'} ({azure.get('subscription_name') or 'N/A'}) |\n"
+                    f"| **Amazon Web Services (AWS)** | {'🟢 Connected' if aws.get('connected') else '🔴 Inactive'} | {aws.get('arn') or 'AWS CLI unauthenticated'} |\n"
+                    f"| **Google Cloud Platform (GCP)** | {'🟢 Connected' if gcp.get('connected') else '🔴 Inactive'} | {gcp.get('account') or 'GCloud SDK unauthenticated'} |\n\n"
+                    "---\n\n"
+                    "### 🔍 Azure Live Subscription Details:\n"
+                    f"{azure_text}\n\n"
+                    "---\n\n"
+                    "### 🛡️ Diagnostic Options & Guardrail Actions:\n"
+                    "1. **Azure Resource Groups:** Run `az group list --output table`\n"
+                    "2. **Azure App Services:** Run `az webapp list --output table`\n"
+                    "3. **AWS STS Identity:** Run `aws sts get-caller-identity`"
+                ),
                 "suggestions": [
                     "Are any Azure services or VMs running?",
                     "List all Azure resource groups",
-                    "Diagnose blank page after EasyAuth SSO on Azure App Service",
+                    "Configure private endpoints between App Service and Postgres",
                     "Audit AWS IAM wildcard policies"
                 ],
                 "execution_plan": [
@@ -637,174 +407,633 @@ az webapp create --resource-group my-devops-rg --plan my-app-plan --name my-devo
             }
         else:
             return {
-                "response": """🔍 **Cloud Infrastructure Doctor Analysis (Azure App Service + EasyAuth SSO)**
-
-**Identified Issue:** Post-SSO blank page / authentication header mismatch.
-
-### 📋 Diagnostic Findings:
-1. **EasyAuth Token Store:** Currently `Disabled` or not forwarding client headers across Azure Front Door.
-2. **Reverse Proxy Headers:** `X-MS-CLIENT-PRINCIPAL` and `X-Forwarded-Host` are missing from downstream backend requests.
-3. **App Settings Check:** `WEBSITE_AUTH_DEFAULT_PROVIDER` is missing in App Service Configuration.
-
-### 🛠️ Recommended Remediation Plan:
-```bash
-# 1. Enable Token Store on Azure App Service
-az webapp auth update --name <your-app-name> --resource-group <your-rg> --token-store true
-
-# 2. Configure Front Door Header Passthrough Rule
-az afd route update --route-name main-route --profile-name fd-profile --resource-group <your-rg> \\
-  --forwarding-protocol HttpsOnly --link-custom-domain Enabled
-
-# 3. Add Required Environment Settings
-az webapp config appsettings set --name <your-app-name> --resource-group <your-rg> \\
-  --settings WEBSITE_AUTH_DEFAULT_PROVIDER=AzureActiveDirectory
-```""",
+                "response": (
+                    "☁️ **Cloud Infrastructure Agent Analysis**\n\n"
+                    f"**Evaluated Query:** `{prompt}`\n\n"
+                    "### 📋 Architectural Analysis & Best Practices:\n"
+                    "1. **Multi-Region Resiliency:** Enforce geo-redundant storage (GRS) and multi-zone deployments across availability zones.\n"
+                    "2. **Zero-Trust Network Perimeter:** Never expose raw database endpoints; use Azure Private Endpoints or AWS PrivateLink inside isolated subnets.\n"
+                    "3. **Identity & Secrets Governance:** Replace long-lived static API secrets with Managed Identities (Azure MSI) or IAM Roles Anywhere with short-lived STS tokens.\n\n"
+                    "### 🛠️ Infrastructure as Code (Terraform) Pattern:\n"
+                    "```hcl\n"
+                    "resource \"azurerm_resource_group\" \"main\" {\n"
+                    "  name     = \"rg-production-eastus\"\n"
+                    "  location = \"East US\"\n"
+                    "  tags = {\n"
+                    "    Environment = \"Production\"\n"
+                    "    ManagedBy   = \"DevOpsAI\"\n"
+                    "  }\n"
+                    "}\n"
+                    "```"
+                ),
                 "suggestions": [
                     "Are any Azure services or VMs running?",
                     "Run VNet connectivity check between App Service and Postgres DB",
-                    "Verify Azure Front Door SSL termination rule",
-                    "Check Application Insights live metrics stream"
+                    "Audit AWS IAM wildcard policies"
                 ],
                 "execution_plan": [
-                    "[READ_ONLY] az webapp auth show --name app-name --resource-group rg",
-                    "[REQUIRES_APPROVAL] az webapp auth update --token-store true",
-                    "[REQUIRES_APPROVAL] az webapp config appsettings set WEBSITE_AUTH_DEFAULT_PROVIDER=AzureActiveDirectory"
+                    "[READ_ONLY] az resource list --output table",
+                    "[REQUIRES_APPROVAL] terraform plan -out=tfplan"
+                ],
+                "safety_level": "READ_ONLY"
+            }
+
+    # -------------------------------------------------------------
+    # 2. CI/CD PIPELINE AGENT
+    # -------------------------------------------------------------
+    elif agent_type == "ci-cd":
+        if any(w in p for w in ["cache", "npm", "pip", "speed", "slow", "faster", "dependency"]):
+            return {
+                "response": (
+                    "⚡ **CI/CD Optimization: High-Performance Dependency Caching**\n\n"
+                    "**Objective:** Cut GitHub Actions CI build times by up to 70% using native cache actions and Docker layer caching.\n\n"
+                    "### 📄 Optimized GitHub Actions Cache Step (`ci.yml`):\n"
+                    "```yaml\n"
+                    "# 1. Node.js / Next.js dependency caching\n"
+                    "- name: Setup Node.js & Cache npm\n"
+                    "  uses: actions/setup-node@v4\n"
+                    "  with:\n"
+                    "    node-version: 20\n"
+                    "    cache: 'npm'\n"
+                    "    cache-dependency-path: '**/package-lock.json'\n\n"
+                    "# 2. Python pip package caching\n"
+                    "- name: Set up Python & Cache pip\n"
+                    "  uses: actions/setup-python@v5\n"
+                    "  with:\n"
+                    "    python-version: '3.11'\n"
+                    "    cache: 'pip'\n"
+                    "    cache-dependency-path: '**/requirements.txt'\n\n"
+                    "# 3. Docker Buildx GitHub Actions Cache Backend\n"
+                    "- name: Build and push Docker image\n"
+                    "  uses: docker/build-push-action@v5\n"
+                    "  with:\n"
+                    "    context: .\n"
+                    "    push: false\n"
+                    "    tags: myapp:latest\n"
+                    "    cache-from: type=gha\n"
+                    "    cache-to: type=gha,mode=max\n"
+                    "```"
+                ),
+                "suggestions": [
+                    "Audit workflow run duration history",
+                    "Add matrix build testing across Node 18, 20, 22",
+                    "Configure automated semantic-release step"
+                ],
+                "execution_plan": [
+                    "[READ_ONLY] inspect_github_actions_cache()",
+                    "[REQUIRES_APPROVAL] update_file('.github/workflows/ci.yml')"
                 ],
                 "safety_level": "REQUIRES_APPROVAL"
             }
-            
-    elif agent_type == "ci-cd":
-        live_status = get_live_cloud_status()
-        git_info = live_status.get("git", {})
-        workflows = git_info.get("workflows", [])
-        wf_list_str = ", ".join([f"`{w}`" for w in workflows]) if workflows else "None detected"
 
-        return {
-            "response": f"""⚡ **CI/CD Pipeline Agent Diagnosis**
+        elif any(w in p for w in ["oidc", "aws", "azure", "secret", "federation", "token", "credentials"]):
+            return {
+                "response": (
+                    "🔐 **Keyless OIDC Cloud Authentication for GitHub Actions**\n\n"
+                    "**Security Standard:** Eliminates static long-lived `AWS_SECRET_ACCESS_KEY` or `AZURE_CREDENTIALS` using OpenID Connect (OIDC) JWT claims.\n\n"
+                    "### 📄 Secure GitHub Actions OIDC Workflow:\n"
+                    "```yaml\n"
+                    "name: Deploy to AWS with OIDC\n"
+                    "on:\n"
+                    "  push:\n"
+                    "    branches: [ main ]\n\n"
+                    "permissions:\n"
+                    "  id-token: write\n"
+                    "  contents: read\n\n"
+                    "jobs:\n"
+                    "  deploy:\n"
+                    "    runs-on: ubuntu-latest\n"
+                    "    steps:\n"
+                    "      - name: Checkout Code\n"
+                    "        uses: actions/checkout@v4\n\n"
+                    "      - name: Configure AWS Credentials via OIDC\n"
+                    "        uses: aws-actions/configure-aws-credentials@v4\n"
+                    "        with:\n"
+                    "          role-to-assume: arn:aws:iam::123456789012:role/GitHubActionsOIDCRole\n"
+                    "          aws-region: us-east-1\n"
+                    "          audience: sts.amazonaws.com\n\n"
+                    "      - name: Verify STS Identity\n"
+                    "        run: aws sts get-caller-identity\n"
+                    "```"
+                ),
+                "suggestions": [
+                    "Generate AWS IAM OIDC trust policy JSON",
+                    "Configure Azure Workload Identity Federation",
+                    "Audit repository secret expiration"
+                ],
+                "execution_plan": [
+                    "[READ_ONLY] aws sts get-caller-identity",
+                    "[REQUIRES_APPROVAL] aws iam create-role --role-name GitHubActionsOIDCRole"
+                ],
+                "safety_level": "REQUIRES_APPROVAL"
+            }
 
-**Analyzed Repository:** `{git_info.get('remote') or 'prathamesh633/AI_Agents_For_DevOps'}`
-**Detected Workflows in `.github/workflows/`:** {wf_list_str}
+        else:
+            workflows = git_info.get("workflows", [])
+            wf_list_str = ", ".join([f"`{w}`" for w in workflows]) if workflows else "None detected"
 
-### 🔍 Pipeline Status & Diagnostic Insights:
-1. **`ci.yml` (DevOps AI Agents CI/CD Pipeline):**
-   - **Backend Job:** Automated test suite for FastAPI & 8 Agent heuristic models.
-   - **Frontend Job:** Next.js 14 TypeScript typecheck & production build.
-   - **Security Job:** Dockerfile non-root user verification.
-2. **`aws.yml` (Amazon ECS Deployment):**
-   - Configured for on-demand `workflow_dispatch` trigger.
+            return {
+                "response": (
+                    "⚡ **CI/CD Pipeline Agent Diagnosis**\n\n"
+                    f"**Analyzed Repository:** `{git_info.get('remote') or 'prathamesh633/AI_Agents_For_DevOps'}`\n"
+                    f"**Detected Workflows in `.github/workflows/`:** {wf_list_str}\n\n"
+                    "### 🔍 Pipeline Status & Diagnostic Insights:\n"
+                    "1. **`ci.yml` (DevOps AI Agents CI/CD Pipeline):**\n"
+                    "   - **Backend Job:** Automated test suite for FastAPI & 8 Agent heuristic models.\n"
+                    "   - **Frontend Job:** Next.js 14 TypeScript typecheck & production build.\n"
+                    "   - **Security Job:** Dockerfile non-root user verification.\n"
+                    "2. **`aws.yml` (Amazon ECS Deployment):**\n"
+                    "   - Configured for on-demand `workflow_dispatch` trigger.\n\n"
+                    "### 💡 Workflow Optimization Recommendations:\n"
+                    "- **Buildx Caching:** Ensure GitHub Actions cache (`cache-from: type=gha`) is active to reduce build times by ~65%.\n"
+                    "- **Secret Hygiene:** Ensure GitHub repository secrets (`AWS_ACCESS_KEY_ID`, `GEMINI_API_KEY`) are scoped per environment."
+                ),
+                "suggestions": [
+                    "How to cache dependencies in GitHub Actions to speed up build?",
+                    "How to set up AWS OIDC authentication in GitHub Actions without access keys?",
+                    "Audit workflow permissions for GITHUB_TOKEN"
+                ],
+                "execution_plan": [
+                    "[READ_ONLY] inspect_github_workflows('.github/workflows')",
+                    "[REQUIRES_APPROVAL] git_push_trigger_workflow('ci.yml')"
+                ],
+                "safety_level": "READ_ONLY"
+            }
 
-### 💡 Workflow Optimization Recommendations:
-- **Buildx Caching:** Ensure GitHub Actions cache (`cache-from: type=gha`) is active to reduce build times by ~65%.
-- **Secret Hygiene:** Ensure GitHub repository secrets (`AWS_ACCESS_KEY_ID`, `GEMINI_API_KEY`) are scoped per environment.""",
-            "suggestions": [
-                "Run GitHub Actions CI workflow locally",
-                "Add automated Docker build dry-run step",
-                "Audit workflow permissions for GITHUB_TOKEN"
-            ],
-            "execution_plan": [
-                "[READ_ONLY] inspect_github_workflows('.github/workflows')",
-                "[REQUIRES_APPROVAL] git_push_trigger_workflow('ci.yml')"
-            ],
-            "safety_level": "READ_ONLY"
-        }
+    # -------------------------------------------------------------
+    # 3. CONTAINER CREATION & ORCHESTRATION AGENTS
+    # -------------------------------------------------------------
+    elif agent_type in ("container-creation", "container-orchestration"):
+        if any(w in p for w in ["go", "golang", "gin", "scratch"]):
+            return {
+                "response": (
+                    "🐳 **Container Creation Agent — Ultra-Lean Multi-Stage Go Binary Dockerfile**\n\n"
+                    "**Detected Stack:** Go 1.22 / Gin REST API\n"
+                    "**Target Image Size:** < 15 MB • Zero CVEs (`scratch` base)\n\n"
+                    "### 📄 Hardened `Dockerfile`:\n"
+                    "```dockerfile\n"
+                    "# Stage 1: Build binary\n"
+                    "FROM golang:1.22-alpine AS builder\n"
+                    "WORKDIR /src\n"
+                    "RUN apk add --no-cache git ca-certificates tzdata\n"
+                    "COPY go.mod go.sum* ./\n"
+                    "RUN go mod download\n"
+                    "COPY . .\n"
+                    "RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \\\n"
+                    "    -ldflags=\"-w -s\" \\\n"
+                    "    -o /bin/app .\n\n"
+                    "# Stage 2: Scratch minimal runtime\n"
+                    "FROM scratch\n"
+                    "COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/\n"
+                    "COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo\n"
+                    "COPY --from=builder /bin/app /bin/app\n\n"
+                    "USER 65534:65534\n"
+                    "EXPOSE 8080\n"
+                    "ENTRYPOINT [\"/bin/app\"]\n"
+                    "```"
+                ),
+                "suggestions": [
+                    "Create docker-compose.yml with Redis & Postgres",
+                    "Scan Go Dockerfile with Trivy for vulnerabilities",
+                    "Add healthcheck endpoint in Gin router"
+                ],
+                "execution_plan": [
+                    "[READ_ONLY] fs_validate_go_modules(go.mod)",
+                    "[REQUIRES_APPROVAL] fs_write_file(path='./Dockerfile')"
+                ],
+                "safety_level": "REQUIRES_APPROVAL"
+            }
 
+        elif any(w in p for w in ["compose", "postgres", "redis", "stack", "fastapi", "fullstack"]):
+            return {
+                "response": (
+                    "🐳 **Container Creation Agent — Full-Stack Production `docker-compose.yml`**\n\n"
+                    "**Stack Scope:** FastAPI Backend + Next.js Frontend + PostgreSQL 16 + Redis 7\n\n"
+                    "### 📄 Production `docker-compose.yml`:\n"
+                    "```yaml\n"
+                    "version: '3.8'\n\n"
+                    "services:\n"
+                    "  postgres:\n"
+                    "    image: postgres:16-alpine\n"
+                    "    container_name: devops_postgres\n"
+                    "    restart: unless-stopped\n"
+                    "    environment:\n"
+                    "      POSTGRES_DB: ${POSTGRES_DB:-app_db}\n"
+                    "      POSTGRES_USER: ${POSTGRES_USER:-app_user}\n"
+                    "      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password}\n"
+                    "    ports:\n"
+                    "      - \"5432:5432\"\n"
+                    "    volumes:\n"
+                    "      - postgres_data:/var/lib/postgresql/data\n"
+                    "    healthcheck:\n"
+                    "      test: [\"CMD-SHELL\", \"pg_isready -U ${POSTGRES_USER:-app_user} -d ${POSTGRES_DB:-app_db}\"]\n"
+                    "      interval: 10s\n"
+                    "      timeout: 5s\n"
+                    "      retries: 5\n\n"
+                    "  redis:\n"
+                    "    image: redis:7-alpine\n"
+                    "    container_name: devops_redis\n"
+                    "    restart: unless-stopped\n"
+                    "    ports:\n"
+                    "      - \"6379:6379\"\n"
+                    "    volumes:\n"
+                    "      - redis_data:/data\n"
+                    "    healthcheck:\n"
+                    "      test: [\"CMD\", \"redis-cli\", \"ping\"]\n"
+                    "      interval: 10s\n"
+                    "      timeout: 3s\n"
+                    "      retries: 3\n\n"
+                    "  backend:\n"
+                    "    build:\n"
+                    "      context: ./backend\n"
+                    "      dockerfile: Dockerfile\n"
+                    "    container_name: devops_backend\n"
+                    "    restart: unless-stopped\n"
+                    "    environment:\n"
+                    "      - DATABASE_URL=postgresql://${POSTGRES_USER:-app_user}:${POSTGRES_PASSWORD:-secure_password}@postgres:5432/${POSTGRES_DB:-app_db}\n"
+                    "      - REDIS_URL=redis://redis:6379/0\n"
+                    "    ports:\n"
+                    "      - \"8000:8000\"\n"
+                    "    depends_on:\n"
+                    "      postgres:\n"
+                    "        condition: service_healthy\n"
+                    "      redis:\n"
+                    "        condition: service_healthy\n\n"
+                    "volumes:\n"
+                    "  postgres_data:\n"
+                    "  redis_data:\n"
+                    "```"
+                ),
+                "suggestions": [
+                    "Add Nginx reverse proxy service with SSL",
+                    "Generate .env.example with secure defaults",
+                    "Audit Docker compose network isolation"
+                ],
+                "execution_plan": [
+                    "[READ_ONLY] validate_compose_schema(version='3.8')",
+                    "[REQUIRES_APPROVAL] fs_write_file(path='./docker-compose.yml')"
+                ],
+                "safety_level": "REQUIRES_APPROVAL"
+            }
+
+        else:
+            return {
+                "response": (
+                    "🐳 **Container Creation Agent — Hardened Multi-Stage Python/FastAPI Dockerfile**\n\n"
+                    "**Detected Stack:** Python 3.11 / FastAPI / Uvicorn\n"
+                    "**Security Standard:** CIS Benchmark • Non-root `appuser` • Slim Debian Base\n\n"
+                    "### 📄 Hardened `Dockerfile`:\n"
+                    "```dockerfile\n"
+                    "FROM python:3.11-slim AS builder\n"
+                    "WORKDIR /build\n"
+                    "RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl && rm -rf /var/lib/apt/lists/*\n"
+                    "COPY requirements.txt .\n"
+                    "RUN pip install --no-cache-dir --user -r requirements.txt\n\n"
+                    "FROM python:3.11-slim AS runtime\n"
+                    "ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH=\"/home/appuser/.local/bin:$PATH\"\n"
+                    "RUN groupadd -g 10001 appgroup && useradd -u 10001 -g appgroup -s /bin/bash -m appuser\n"
+                    "WORKDIR /app\n"
+                    "COPY --from=builder --chown=appuser:appgroup /root/.local /home/appuser/.local\n"
+                    "COPY --chown=appuser:appgroup . /app\n"
+                    "USER appuser\n"
+                    "EXPOSE 8000\n"
+                    "HEALTHCHECK --interval=30s --timeout=5s CMD curl -f http://localhost:8000/health || exit 1\n"
+                    "CMD [\"uvicorn\", \"main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\", \"--workers\", \"4\"]\n"
+                    "```"
+                ),
+                "suggestions": [
+                    "Generate multi-stage Dockerfile for Go Gin REST API",
+                    "Create docker-compose setup for FastAPI, PostgreSQL, and Redis",
+                    "Audit Dockerfile with Trivy security scanner"
+                ],
+                "execution_plan": [
+                    "[READ_ONLY] dockerfile_lint_best_practices(HADOLINT)",
+                    "[REQUIRES_APPROVAL] fs_write_file(path='./Dockerfile')"
+                ],
+                "safety_level": "REQUIRES_APPROVAL"
+            }
+
+    # -------------------------------------------------------------
+    # 4. INCIDENT RESPONSE AGENT
+    # -------------------------------------------------------------
     elif agent_type == "incident-response":
+        if any(w in p for w in ["oom", "137", "oomkilled", "memory", "leak"]):
+            return {
+                "response": (
+                    "🚨 **Incident Response Agent — Exit Code 137 (OOMKilled) RCA**\n\n"
+                    "**Root Cause:** Container memory usage exceeded Linux cgroup `limits.memory` threshold, triggering the kernel Out-Of-Memory Killer (`sigkill -9`).\n\n"
+                    "### 📊 Diagnostic Breakdown:\n"
+                    "1. **Container Memory Limit:** Currently set to `512MiB`.\n"
+                    "2. **Spike Culprit:** Python Pandas/Numpy batch loading entire 2GB CSV into RAM without chunking.\n"
+                    "3. **Memory Profile:** Worker memory climbed from 180MB to 512MB within 14 seconds before kernel killed PID 1.\n\n"
+                    "### 🛠️ Immediate Remediation Steps:\n"
+                    "```bash\n"
+                    "# 1. Inspect recent OOMKilled events in Kubernetes\n"
+                    "kubectl get pods --field-selector=status.phase=Failed -o wide\n"
+                    "kubectl describe pod <pod-name> | grep -E \"Last State|Exit Code|OOMKilled\"\n\n"
+                    "# 2. Increase Memory Limit in Deployment Manifest\n"
+                    "kubectl set resources deployment my-app --limits=memory=1.5Gi,cpu=1000m --requests=memory=512Mi,cpu=250m\n"
+                    "```\n\n"
+                    "### 💻 Code Fix (Streamed Chunk Processing):\n"
+                    "```python\n"
+                    "# Before: df = pd.read_csv('large_file.csv') -> OOM\n"
+                    "# After: Stream in 10,000 row chunks\n"
+                    "for chunk in pd.read_csv('large_file.csv', chunksize=10000):\n"
+                    "    process_chunk(chunk)\n"
+                    "```"
+                ),
+                "suggestions": [
+                    "Configure Prometheus alert for container_memory_working_set_bytes > 85%",
+                    "Set up horizontal pod autoscaler (HPA) on memory metrics",
+                    "Profile memory heap with tracemalloc"
+                ],
+                "execution_plan": [
+                    "[READ_ONLY] kubectl describe pod <pod-name>",
+                    "[REQUIRES_APPROVAL] kubectl set resources deployment my-app --limits=memory=1.5Gi"
+                ],
+                "safety_level": "REQUIRES_APPROVAL"
+            }
+
+        else:
+            return {
+                "response": (
+                    "🚨 **Incident Response Agent — Root Cause Analysis (RCA)**\n\n"
+                    f"**Incident Focus:** `{prompt}`\n\n"
+                    "### 📊 Root Cause Timeline:\n"
+                    "- **T-10m:** Spike in concurrent requests to backend API.\n"
+                    "- **T-5m:** Database connection pool exhaustion (`max_connections=100` reached).\n"
+                    "- **T-0m:** Application started throwing HTTP 502 / 504 Gateway Timeout.\n\n"
+                    "### 🎯 5-Why Root Cause Chain:\n"
+                    "1. **Why did service fail?** Downstream HTTP requests timed out after 30s.\n"
+                    "2. **Why timeout?** Database refused new connection attempts.\n"
+                    "3. **Why refused connections?** Active connection count hit 100/100 limit.\n"
+                    "4. **Why 100 connections?** Async handlers spawned new DB connections per request without pooling.\n"
+                    "5. **Root Cause:** Missing `pool_size` and `max_overflow` settings in SQLAlchemy database engine initialization.\n\n"
+                    "### 🛡️ Immediate Remediation:\n"
+                    "```python\n"
+                    "from sqlalchemy import create_engine\n\n"
+                    "engine = create_engine(\n"
+                    "    DATABASE_URL,\n"
+                    "    pool_size=15,\n"
+                    "    max_overflow=25,\n"
+                    "    pool_timeout=30,\n"
+                    "    pool_recycle=1800\n"
+                    ")\n"
+                    "```"
+                ),
+                "suggestions": [
+                    "How to fix container crashed with Exit Code 137 OOMKilled?",
+                    "Deploy pgBouncer connection pooler in front of Postgres",
+                    "Set up Prometheus latency alert for p99 > 500ms"
+                ],
+                "execution_plan": [
+                    "[READ_ONLY] Check active DB connections query",
+                    "[REQUIRES_APPROVAL] Restart backend application pool"
+                ],
+                "safety_level": "REQUIRES_APPROVAL"
+            }
+
+    # -------------------------------------------------------------
+    # 5. CODE ANALYSIS AGENT
+    # -------------------------------------------------------------
+    elif agent_type == "code-analysis":
+        if any(w in p for w in ["sql", "injection", "query", "orm", "sanitiz"]):
+            return {
+                "response": (
+                    "🛡️ **Code Analysis Agent — SQL Injection Vulnerability Audit**\n\n"
+                    "**Vulnerability Type:** CWE-89 (Improper Neutralization of Special Elements used in an SQL Command)\n"
+                    "**Severity:** 🔴 **CRITICAL**\n\n"
+                    "### ❌ Insecure Code Pattern (Detected):\n"
+                    "```python\n"
+                    "# VULNERABLE: Direct string formatting into raw SQL\n"
+                    "query = f\"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'\"\n"
+                    "cursor.execute(query) # Attacker input: ' OR '1'='1\n"
+                    "```\n\n"
+                    "### ✅ Secure Remediation (Parameterized Queries):\n"
+                    "```python\n"
+                    "# FIXED: Using parameterized SQL bindings\n"
+                    "query = \"SELECT id, username, email FROM users WHERE username = %s AND password_hash = %s\"\n"
+                    "cursor.execute(query, (username, hashed_password))\n\n"
+                    "# Or using SQLAlchemy ORM (Type-safe)\n"
+                    "user = db.query(User).filter(User.username == username).first()\n"
+                    "```"
+                ),
+                "suggestions": [
+                    "Run Bandit Python security scanner across codebase",
+                    "Audit FastAPI async route handlers for blocking I/O",
+                    "Enforce Pre-commit git hook with Semgrep SAST rules"
+                ],
+                "execution_plan": [
+                    "[READ_ONLY] bandit -r ./app -ll",
+                    "[READ_ONLY] semgrep scan --config auto"
+                ],
+                "safety_level": "READ_ONLY"
+            }
+
+        else:
+            return {
+                "response": (
+                    "🔍 **Code Analysis & Performance Diagnostics**\n\n"
+                    f"**Evaluated Target:** `{prompt}`\n\n"
+                    "### 📋 Code Health & Quality Assessment:\n"
+                    "1. **Async Event Loop Blocking:** Ensure synchronous blocking calls (`requests.get`, `time.sleep`) are replaced with non-blocking equivalents (`httpx.AsyncClient`, `asyncio.sleep`).\n"
+                    "2. **Resource Leaks:** Ensure file handles, HTTP sessions, and database sessions use context managers (`async with` / `with`).\n"
+                    "3. **Exception Safety:** Avoid bare `except:` clauses; catch explicit `HTTPException` or `DatabaseError` to avoid masking `CancelledError`.\n\n"
+                    "### 🛠️ Python Async Best-Practice Pattern:\n"
+                    "```python\n"
+                    "import asyncio\n"
+                    "import httpx\n"
+                    "from fastapi import FastAPI, HTTPException\n\n"
+                    "app = FastAPI()\n\n"
+                    "@app.get(\"/api/fetch-telemetry\")\n"
+                    "async def fetch_telemetry():\n"
+                    "    async with httpx.AsyncClient(timeout=10.0) as client:\n"
+                    "        try:\n"
+                    "            res = await client.get(\"https://api.internal.service/metrics\")\n"
+                    "            res.raise_for_status()\n"
+                    "            return res.json()\n"
+                    "        except httpx.HTTPError as exc:\n"
+                    "            raise HTTPException(status_code=502, detail=str(exc))\n"
+                    "```"
+                ),
+                "suggestions": [
+                    "Detect SQL injection vulnerabilities in our query builder",
+                    "Detect memory leaks and unclosed connections in Python FastAPI",
+                    "Profile async event loop latency with py-spy"
+                ],
+                "execution_plan": [
+                    "[READ_ONLY] pylint app/ --rcfile=.pylintrc",
+                    "[READ_ONLY] mypy app/ --strict"
+                ],
+                "safety_level": "READ_ONLY"
+            }
+
+    # -------------------------------------------------------------
+    # 6. SECURITY SCANNING AGENT
+    # -------------------------------------------------------------
+    elif agent_type == "security-scanning":
+        if any(w in p for w in ["trivy", "docker", "cve", "image", "vulnerability"]):
+            return {
+                "response": (
+                    "🛡️ **Security Scanning Agent — Trivy Container Image Security Audit**\n\n"
+                    "**Target:** Automated vulnerability scanner with CI pipeline gatekeeper.\n\n"
+                    "### 🔍 Trivy Scanning Pipeline Command:\n"
+                    "```bash\n"
+                    "# 1. Scan container image and output table summary\n"
+                    "trivy image --severity HIGH,CRITICAL myapp:latest\n\n"
+                    "# 2. Block CI pipeline if CRITICAL CVEs with existing fixes are found\n"
+                    "trivy image --exit-code 1 --severity CRITICAL --ignore-unfixed myapp:latest\n"
+                    "```\n\n"
+                    "### 📄 GitHub Actions Security Step:\n"
+                    "```yaml\n"
+                    "- name: Run Trivy Vulnerability Scanner\n"
+                    "  uses: aquasecurity/trivy-action@master\n"
+                    "  with:\n"
+                    "    image-ref: 'myapp:${{ github.sha }}'\n"
+                    "    format: 'table'\n"
+                    "    exit-code: '1'\n"
+                    "    ignore-unfixed: true\n"
+                    "    severity: 'CRITICAL,HIGH'\n"
+                    "```"
+                ),
+                "suggestions": [
+                    "Audit Terraform files with Checkov for CIS compliance",
+                    "Run TruffleHog to detect leaked API keys in Git history",
+                    "Enforce non-root user in all base Docker images"
+                ],
+                "execution_plan": [
+                    "[READ_ONLY] trivy image --severity HIGH,CRITICAL myapp:latest",
+                    "[READ_ONLY] trivy fs --scanners vuln,secret,config ."
+                ],
+                "safety_level": "READ_ONLY"
+            }
+
+        else:
+            return {
+                "response": (
+                    "🛡️ **Security Scanning Agent — IaC & CIS Compliance Benchmark**\n\n"
+                    "**Audit Framework:** CIS Microsoft Azure / AWS Foundations Benchmark v2.0 • Checkov Scanner\n\n"
+                    "### 🔍 Key Compliance Checks:\n"
+                    "1. **Azure Storage:** Ensure `https_only` is enforced and public blob access is disabled.\n"
+                    "2. **AWS S3:** Ensure `BlockPublicAcls` and `BlockPublicPolicy` are `true`.\n"
+                    "3. **Kubernetes:** Ensure all Pod security contexts specify `runAsNonRoot: true` and `readOnlyRootFilesystem: true`.\n\n"
+                    "### 🛠️ Checkov Scanner Execution:\n"
+                    "```bash\n"
+                    "# Scan Terraform directory for CIS violations\n"
+                    "checkov -d ./terraform --framework terraform --compact\n"
+                    "```"
+                ),
+                "suggestions": [
+                    "How to scan Docker images with Trivy and block CI on critical CVEs?",
+                    "Audit our Terraform code for CIS compliance violations",
+                    "Scan Git repository for hardcoded secrets with TruffleHog"
+                ],
+                "execution_plan": [
+                    "[READ_ONLY] checkov -d ./terraform",
+                    "[READ_ONLY] trivy fs ."
+                ],
+                "safety_level": "READ_ONLY"
+            }
+
+    # -------------------------------------------------------------
+    # 7. PERFORMANCE MONITORING AGENT
+    # -------------------------------------------------------------
+    elif agent_type == "performance-monitoring":
         return {
-            "response": """🚨 **Incident Response Agent — Root Cause Analysis (RCA)**
-
-**Incident Focus:** `{prompt}`
-
-### 📊 Root Cause Timeline:
-- **T-10m:** Spike in concurrent requests to `/api/process-invoice`
-- **T-5m:** Database connection pool exhaustion (`max_connections=100` reached)
-- **T-0m:** Azure Function App started throwing HTTP 502 / Gateway Timeout
-
-### 🎯 5-Why Root Cause Chain:
-1. **Why did service fail?** Function App invocations returned 500/502 errors.
-2. **Why 502 errors?** Database refused new connection attempts.
-3. **Why refused connections?** Active connection count hit 100/100 limit.
-4. **Why 100 connections?** Async handlers spawned new DB engine connections per request without pooling.
-5. **Root Cause:** Missing `pool_size` and `max_overflow` settings in SQLAlchemy database engine initialization.
-
-### 🛡️ Immediate Remediation:
-```python
-# Fix in database.py
-from sqlalchemy import create_engine
-
-engine = create_engine(
-    DATABASE_URL,
-    pool_size=10,          # Restrict max base pool
-    max_overflow=20,        # Controlled burst overflow
-    pool_timeout=30,        # Timeout waiting for pool connection
-    pool_recycle=1800       # Recycle stale connections
-)
-```""",
+            "response": (
+                "📈 **Performance & Observability Agent Analysis**\n\n"
+                f"**Investigated Target:** `{prompt}`\n\n"
+                "### 🔍 APM Latency & Bottleneck Analysis:\n"
+                "1. **p99 Latency Degradation:** Slow queries (> 250ms) causing head-of-line blocking in async workers.\n"
+                "2. **Database Query Profiling:** Missing composite indexes on `(tenant_id, created_at)` column leading to sequential full-table scans.\n"
+                "3. **Connection Wait Time:** Pool acquisition delay peaked at 1.4s under 500 concurrent users.\n\n"
+                "### 🛠️ PostgreSQL Indexing & Optimization Fix:\n"
+                "```sql\n"
+                "-- 1. Identify slow unindexed queries in PostgreSQL\n"
+                "SELECT query, calls, total_exec_time, mean_exec_time, rows\n"
+                "FROM pg_stat_statements\n"
+                "ORDER BY mean_exec_time DESC\n"
+                "LIMIT 5;\n\n"
+                "-- 2. Add non-blocking concurrent index\n"
+                "CREATE INDEX CONCURRENTLY idx_invoices_tenant_created \n"
+                "ON invoices(tenant_id, created_at DESC);\n"
+                "```"
+            ),
             "suggestions": [
-                "Deploy pgBouncer connection pooler in front of Postgres",
-                "Set Azure PostgreSQL max_connections parameter to 200",
-                "Add alert rule when DB connection count > 80%"
+                "Profile Python CPU bottlenecks using py-spy",
+                "Investigate 100% CPU usage in Python async event loop",
+                "Configure Prometheus histogram metrics for endpoint latency"
             ],
             "execution_plan": [
-                "[READ_ONLY] Check active DB connections query",
-                "[REQUIRES_APPROVAL] Restart Azure Function App pool"
+                "[READ_ONLY] SELECT * FROM pg_stat_activity WHERE state = 'active';",
+                "[REQUIRES_APPROVAL] CREATE INDEX CONCURRENTLY idx_invoices_tenant_created ON invoices(tenant_id, created_at DESC);"
             ],
             "safety_level": "REQUIRES_APPROVAL"
         }
 
-    elif agent_type == "security-scanning":
+    # -------------------------------------------------------------
+    # 8. LOAD TESTING AGENT
+    # -------------------------------------------------------------
+    elif agent_type == "load-testing":
         return {
-            "response": """🛡️ **Security & Compliance Scanner Agent**
-
-**Scan Scope:** `{prompt}`
-
-### 🚨 Security Audit Results:
-
-| Severity | Resource | Vulnerability / Issue | Recommendation |
-| :--- | :--- | :--- | :--- |
-| **CRITICAL** | `Terraform / main.tf` | S3 / Storage Account public access enabled | Set `public_network_access_enabled = false` |
-| **HIGH** | `Dockerfile` | Container running as `root` user | Add `USER node` or `USER appuser` |
-| **HIGH** | `IAM Policy` | AWS IAM role with `*:*` wildcard admin | Scope down permissions to specific ARN |
-| **MEDIUM** | `requirements.txt` | Dependency `urllib3<2.0` has known CVE | Upgrade to `urllib3>=2.2.0` |
-
-### 🔧 Hardened Dockerfile Example:
-```dockerfile
-FROM python:3.10-slim
-RUN groupadd -r appgroup && useradd -r -g appgroup appuser
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-USER appuser
-EXPOSE 8000
-CMD ["python", "app.py"]
-```""",
+            "response": (
+                "🧪 **Load Testing & Capacity Planning Agent — k6 Stress Suite**\n\n"
+                "**Test Scope:** 1,000 Concurrent Virtual Users (VUs) • Ramp-up • Threshold Validation (p95 < 200ms)\n\n"
+                "### 📄 Production `load_test.js` (k6):\n"
+                "```javascript\n"
+                "import http from 'k6/http';\n"
+                "import { check, sleep } from 'k6';\n\n"
+                "export const options = {\n"
+                "  stages: [\n"
+                "    { duration: '30s', target: 200 },  // Ramp-up to 200 VUs\n"
+                "    { duration: '1m', target: 1000 },  // Surge to 1,000 VUs peak\n"
+                "    { duration: '30s', target: 0 },    // Ramp-down\n"
+                "  ],\n"
+                "  thresholds: {\n"
+                "    http_req_duration: ['p(95)<200', 'p(99)<400'],\n"
+                "    http_req_failed: ['rate<0.01'],\n"
+                "  },\n"
+                "};\n\n"
+                "export default function () {\n"
+                "  const res = http.get('http://localhost:8000/api/health');\n"
+                "  check(res, {\n"
+                "    'status is 200': (r) => r.status === 200,\n"
+                "    'response time < 200ms': (r) => r.timings.duration < 200,\n"
+                "  });\n"
+                "  sleep(0.5);\n"
+                "}\n"
+                "```\n\n"
+                "### 🚀 Execute k6 Load Test:\n"
+                "```bash\n"
+                "k6 run --vus 1000 --duration 2m load_test.js\n"
+                "```"
+            ),
             "suggestions": [
-                "Run Trivy container scan on build image",
-                "Enforce Checkov IaC security rules in pull requests",
-                "Rotate hardcoded credentials in environment variables"
+                "Simulate traffic surge on Azure App Service",
+                "Generate Locust distributed Python load testing script",
+                "Analyze throughput bottleneck in invoice processing"
             ],
             "execution_plan": [
-                "[READ_ONLY] checkov -d ./terraform",
-                "[READ_ONLY] trivy image myapp:latest"
+                "[READ_ONLY] k6 run --vus 10 --duration 10s load_test.js",
+                "[REQUIRES_APPROVAL] k6 run --vus 1000 --duration 2m load_test.js"
             ],
-            "safety_level": "READ_ONLY"
+            "safety_level": "REQUIRES_APPROVAL"
         }
 
-    # Default fallback heuristic response for other agents
+    # Default fallback heuristic response for any other agent / general prompt
     return {
-        "response": f"""🤖 **{agent_type.replace('-', ' ').title()} Agent Response**
-
-**Analyzed Request:** `{prompt}`
-
-### 📊 System Findings & Insights:
-1. **Configuration Status:** Environment parameters parsed successfully.
-2. **Operational Recommendation:** Best practice patterns applied for `{agent_type}` domain.
-3. **Guardrails Status:** All actions checked against security policy baseline.
-
-### 💡 Recommended Next Actions:
-- Validate configuration against staging cluster
-- Execute automated smoke test suite
-- Monitor telemetry dashboard for anomalies""",
+        "response": (
+            f"🤖 **{agent_type.replace('-', ' ').title()} Agent Response**\n\n"
+            f"**Analyzed Request:** `{prompt}`\n\n"
+            "### 📊 System Findings & Insights:\n"
+            f"1. **Configuration Status:** Environment parameters parsed successfully for `{agent_type}`.\n"
+            "2. **Operational Recommendation:** Best-practice patterns verified across architecture, observability, and safety.\n"
+            "3. **Guardrails Status:** All actions validated against non-destructive security baseline.\n\n"
+            "### 💡 Recommended Next Actions:\n"
+            "- Validate configuration against staging cluster\n"
+            "- Execute automated smoke test suite\n"
+            "- Monitor telemetry dashboard for anomalies"
+        ),
         "suggestions": [
             f"Run diagnostic sweep for {agent_type}",
             "Generate summary report in Markdown",
@@ -847,7 +1076,7 @@ async def call_gemini_api(prompt: str, system_instruction: str, api_key: str) ->
 async def call_ollama_api(prompt: str, system_instruction: str) -> str:
     url = "http://localhost:11434/v1/chat/completions"
     payload = {
-        "model": "llama3", # or qwen2.5-coder
+        "model": "llama3",
         "messages": [
             {"role": "system", "content": system_instruction},
             {"role": "user", "content": prompt}
@@ -941,8 +1170,8 @@ async def query_agent(req: AgentRequest):
                 agent_type=agent_type,
                 provider_used="Google Gemini 2.0 Flash (Free API)",
                 response=text_response,
-                suggestions=["Generate docker-compose.yml", "Audit Dockerfile for security", "Add multi-arch build options"],
-                execution_plan=["[READ_ONLY] fs_detect_framework()", "[REQUIRES_APPROVAL] fs_write_dockerfile('./Dockerfile')"],
+                suggestions=["Generate docker-compose.yml", "Audit code for security", "Add multi-arch build options"],
+                execution_plan=["[READ_ONLY] fs_detect_framework()", "[REQUIRES_APPROVAL] apply_recommended_fix()"],
                 safety_level="REQUIRES_APPROVAL",
                 timestamp=time.time() - start_time
             )
